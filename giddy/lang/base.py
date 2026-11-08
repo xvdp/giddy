@@ -22,7 +22,7 @@ class Line:
 
 @dataclass
 class Unit:
-    key: str                    # pairing key, unique per file: "Klass.method", "<module>", "name#2"
+    key: str                    # pairing key, unique per file: "MyClass.method", "<module>", "name#2"
     kind: str                   # "function" | "class" | "module" | "text"
     label: str                  # display name
     lines: list[Line]           # normalized lines in file order

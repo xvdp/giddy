@@ -18,7 +18,7 @@ pip install -e .
 giddy --help          # or: python -m giddy --help
 ```
 
-Requires Python ≥ 3.9 and git. Python sources are parsed by the running interpreter: syntax newer than the interpreter (for example PEP 701 f-strings under Python < 3.12) falls back to a plain line diff for that file.
+Requires Python ≥ 3.9 and git, no other dependencies. Python sources are parsed by the running interpreter: syntax newer than the interpreter (for example PEP 701 f-strings under Python < 3.12) falls back to a plain line diff for that file.
 
 ## Usage
 
@@ -75,8 +75,39 @@ giddy --open `N`        # fold when more than N lines
 giddy -o `<path>.md`
 giddy --stdout          # print only. no file out
 ```
-### Only python has been implemented. Implement other languages into.
-Language adapters for Rust, TypeScript, GLSL and Slang plug into `giddy/lang/` (interface in `giddy/lang/base.py`).
+### Languages
+
+| language | extensions | units | qualified names |
+|---|---|---|---|
+| Python | `py pyi` | functions, classes, module statements | `MyClass.method` |
+| C | `c` | functions, `struct`/`union`, file statements | `func` |
+| C++, CUDA | `cpp cc cxx h hh hpp hxx ipp inl tpp cu cuh` | functions, operators, `class`/`struct`/`union`/`namespace`/`extern "C"` | `ns::MyClass::method` |
+| Rust | `rs` | `fn`, `impl`/`trait`/`mod`/`extern` blocks | `Foo::new`, `<Foo as Display>::fmt` |
+| TypeScript | `ts tsx mts cts` | functions, methods, arrow functions assigned to names, `class`/`interface`/`namespace`/`module` | `MyClass.method` |
+| JavaScript | `js jsx mjs cjs` | functions, methods, arrow functions assigned to names, `class` | `MyClass.method` |
+| GLSL | `glsl vert frag comp geom tesc tese mesh task rgen rchit rmiss ...` | functions, `struct` | `func` |
+| Slang, HLSL | `slang slangh hlsl hlsli fx fxh` | functions, `struct`/`class`/`interface`/`extension`/`namespace` | `Struct.method` |
+| Julia | `jl` | `function`/`macro`, short form `f(x) = ...`, `struct`/`abstract type`/`primitive type`, `module` | `Module.func` |
+
+Any other extension gets a plain line diff with `-C` context lines.
+
+A function appears whole, nested closures and lambdas included. Code-only mode compares token sequences: a unit changed only in comments, doc comments, Julia docstrings or layout is dropped. A name defined more than once (C++/Slang overloads, Julia methods) is keyed with its parameter list, e.g. `spacing(g::Grid, i)`.
+
+Non-Python languages use one shared tokenizer and brace/`end` matcher in `giddy/lang/` with no dependencies. C-family preprocessor `#if`/`#elif`/`#else` branches are followed along the first possible branch for structure; tokens in the other branches still count as changes. A file whose brackets or blocks do not balance falls back to a line diff, marked `parse failed` in the report.
+
+Parse rate on files at HEAD:
+
+| corpus | language | files parsed |
+|---|---|---|
+| Meromorph/ceen | Rust, TS, JS | 231/231 |
+| sdfx | Slang | 9/9 |
+| stochasticsplats | GLSL | 29/29 |
+| libjpeg-turbo | C | 240/240 |
+| faiss | C++, CUDA | 788/788 |
+| pbrt-v4 | C++ | 213/213 |
+| Oceananigans.jl | Julia | 667/668 (the one failure is invalid Julia) |
+
+Adding a language: subclass `Adapter` (`giddy/lang/base.py`), or add a `CSpec` entry for a brace language (`giddy/lang/clike.py`), then register its extensions in `giddy/lang/__init__.py`.
 
 ## Python API
 
