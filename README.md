@@ -1,102 +1,111 @@
 # giddy
 
-`giddy` options is a wrap of `git diff` with simplified options and filters which writes to a fenced `.md`.
+`git diff` wrap to static `.md` with simple options and filters. Outputs static `.md` with fenced diff including extents of the functional unit. Omits docstring and formatting changes.
 
-Each changed function is written in full with patched lines. Only code gets written, omits docstring and formatting changes.
 ```diff
 def func():
-    unchanged code
+    all unchanged code up to def, class, trait, etc...
+    ...
 -    removed code
 +    added code
+    ...
     return
 ```
 
 ## Install
 
 ```bash
-pip install -e .
+pip install .
 giddy --help          # or: python -m giddy --help
 ```
 
-Requires Python ≥ 3.9 and git, no other dependencies. Python sources are parsed by the running interpreter: syntax newer than the interpreter (for example PEP 701 f-strings under Python < 3.12) falls back to a plain line diff for that file.
+Requires Python >= 3.9 and git. Python parsed by running interpreter: newer syntax falls back to a plain line diff.
 
 ## Usage
 
 ```bash
-giddy                      # diff HEAD vs 1 commit back 
-giddy -10 HEAD             # HEAD vs 10 commits back
-giddy S                    # staged files vs HEAD
-giddy U 0042 -p src/ops    # working tree vs commit 42, files under src/ops
-giddy a1b2c3 -e py,rs      # commit a1b2c3 vs its parent, .py and .rs files
-giddy 1 --stdout           # print the report instead of writing it
+giddy   # Defaults: diff HEAD vs its parent, .py files, under '.' cwd, write to:
+        # git_root/.giddy/`<branch>_<commitindex>_<previndex>_<folder>_<filters>.md`
+giddy -10 HEAD  # 2 entries: HEAD vs 10 commits back
+        # -N | ~N   Nth ancestor
+giddy S # one commit entry for (S | U) compares to HEAD
+        # S | staged | cached | index       'git add' staged changes
+
+# filter by path
+giddy U 0042 -p src/ops    # unstaged files vs 42nd commit, files under src/ops
+        # U | unstaged | worktree | wt  unstaged files
+        # 0042 | 42                     commit index
+        # -p | -path                    diff files under path
+
+# file type filters
+giddy a1b2c3 -e py,rs   # commit a1b2c3 vs parent, .py and .rs files
+        # SHA-1             commit by SHA-1 hash against parent
+        # -e | --ext        filter by extension ( default .py)
+    giidy -e py,rs      # only python and rust
+    giddy -e all        # every file
+
+# Ouptut control
+giddy 1 --stdout    # commit 1 vs commit 0, print only, no .md written
+        # --stdout  # print only
+giddy -o `<path>.md`
+        # -o | --out    overrides default dir [git root/.giddy]
+giddy -C 5          # show 5 context lines on non-Python files (default: 3)
+        # -C | --context
+giddy --open 10     # fold output on functions > 10 lines (default: 40)
 ```
+**Outputs**
 
+<samp>
 
-A `giddy` call writes a `<branch>_<commitindex>_<oldercommitindex>_<folder>_<filters>.md`
-to output_dir, default `<git project root>/.giddy/`. File name and location can be overridden.
+Writes diff .md:  `<output dir>`/`<branch>_<commitindex>_<oldercommitindex>_<folder>_<filters>.md`.
 
-A commit table, `<output dir>/commits.md` lists commits  by a `%04d` commit index and SHA-1 hash, includding  and `giddy` outputs.
+Default output_dir: `<git project root>`/`.giddy/`. Can be overridden `-o <path>/<name>`
 
+Writes commit table: `<output dir>`/`commits.md`, listed by a `%04d_hash` (commit_index, SHA-1 hash).
+</samp>
 | commit | date | subject | reports |
 |---|---|---|---|
-| `0207_ec5ea73` | YY-MM-DD | … | links |
-Commit table lists commits by `commit index_sha hash`.
+| `0207_ec5ea73` | YY-MM-DD | ... | `links to diff .md` |
 
-### Comparison points
-
-`giddy` takes 0, 1 or 2 order independent comparison points.
-
-* *`%04d` commit index*:    `giddy` lists commits `git log --oneline` and assigns a commmit index to each.
-* *`-N`|`~N`*:  Nth ancestror of HEAD.s
-* *`S`|`staged`|`cached`|`index`*:    staged changes from `git add`. Equivalent to `git diff --cached`.
-* *`U`|`unstaged`|`worktree`|`wt`*:    unstaged changes or working directory.
-* *hash, partial hash, branch, tag, `HEAD~n`* are processed with git rev-parse.
-
-Comparison defaults
+**Commit entry options**
 ```bash
-giddy                       # HEAD to parent
-giddy `<comparison point>`  # comparison point to parent
-giddy `<S|U>`               # staged | working to HEAD
+U | unstaged | worktree | wt    # unstaged files
+S | staged | cached | index     # files staged with `git add`
+HEAD | HEAD-<int> | HEAD~<int>
+<SHA-1 hash>    # short or long hash
+<int>           # commit index starting with 0
+<-int>          # parent distance to HEAD
+
+hash, partial hash, branch, tag, HEAD~<int> # processed with git rev-parse
 ```
 
-### Options
-```bash
-# filter by path       (-p | --path)
-giddy -p `<path>`       # only git diff under path
-cd  `<path>` && giddy   # idem
-# filter by extension  (-e | --ext)  # default only python files
-giidy -e py,rs          # only python and rust
-giddy -e all            # every file
-# context lines        (-C | --context N)
-giddy -C `N`            # context lines fallback by non-Python files (default: 3)
-# fold lines
-giddy --open `N`        # fold when more than N lines
-# output               (-o --out <path>) overwrites default dir [git root/.giddy]
-giddy -o `<path>.md`
-giddy --stdout          # print only. no file out
-```
 ### Languages
+```
+            extensions
+python      py pyi          func, classes, mod stm
+c           c               func, struct|union, file stm
+c++ CUDA    cpp cc cxx h hh hpp hxx ipp inl tpp cu cu
+                            func, op, class|struct|union|namespace|extern "C"
+rust        rs              fn, impl|trait|mod|extern blocks
+typescript  ts tsx mts cts  func, methods, arrow func., class|interface|namespace|mod
+javascript  js jsx mjs cjs  func, methods , arrow func., class
+glsl        glsl vert frag comp geom tesc tese mesh task rgen rchit rmiss ...
+                            func, struct
+julia       jl              funct|macro, short form f(x) = ..., struct
 
-| language | extensions | units | qualified names |
-|---|---|---|---|
-| Python | `py pyi` | functions, classes, module statements | `MyClass.method` |
-| C | `c` | functions, `struct`/`union`, file statements | `func` |
-| C++, CUDA | `cpp cc cxx h hh hpp hxx ipp inl tpp cu cuh` | functions, operators, `class`/`struct`/`union`/`namespace`/`extern "C"` | `ns::MyClass::method` |
-| Rust | `rs` | `fn`, `impl`/`trait`/`mod`/`extern` blocks | `Foo::new`, `<Foo as Display>::fmt` |
-| TypeScript | `ts tsx mts cts` | functions, methods, arrow functions assigned to names, `class`/`interface`/`namespace`/`module` | `MyClass.method` |
-| JavaScript | `js jsx mjs cjs` | functions, methods, arrow functions assigned to names, `class` | `MyClass.method` |
-| GLSL | `glsl vert frag comp geom tesc tese mesh task rgen rchit rmiss ...` | functions, `struct` | `func` |
-| Slang, HLSL | `slang slangh hlsl hlsli fx fxh` | functions, `struct`/`class`/`interface`/`extension`/`namespace` | `Struct.method` |
-| Julia | `jl` | `function`/`macro`, short form `f(x) = ...`, `struct`/`abstract type`/`primitive type`, `module` | `Module.func` |
+abbreviations: `functions`: func, `module`: mod, `statements`: stm, `operators`: op
+```
+```
+Other ext:  line diff with `-C` context lines.
+Overloads:  keyed with parameter list, e.g. `spacing(g::Grid, i)`.
+Non-python:  use shared tokenizer and brace|end matcher in ./giddy/lang/ with no dependencies.
+Directives  #if|#elif|#else`:  followed along the first branch, includes tokens in other branches.
+```
+On parsing fail, returns line diff tagged `parse failed`.
 
-Any other extension gets a plain line diff with `-C` context lines.
+**Adding a language:**
 
-A function appears whole, nested closures and lambdas included. Code-only mode compares token sequences: a unit changed only in comments, doc comments, Julia docstrings or layout is dropped. A name defined more than once (C++/Slang overloads, Julia methods) is keyed with its parameter list, e.g. `spacing(g::Grid, i)`.
-
-Non-Python languages use one shared tokenizer and brace/`end` matcher in `giddy/lang/` with no dependencies. C-family preprocessor `#if`/`#elif`/`#else` branches are followed along the first possible branch for structure; tokens in the other branches still count as changes. A file whose brackets or blocks do not balance falls back to a line diff, marked `parse failed` in the report.
-
-
-Adding a language: subclass `Adapter` (`giddy/lang/base.py`), or add a `CSpec` entry for a brace language (`giddy/lang/clike.py`), then register its extensions in `giddy/lang/__init__.py`.
+subclass `Adapter` in `giddy/lang/base.py`, or add a `CSpec` entry for a brace language, `giddy/lang/clike.py`, then register its extensions in `giddy/lang/__init__.py`.
 
 ## Python API
 
