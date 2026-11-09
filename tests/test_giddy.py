@@ -157,7 +157,7 @@ def test_method_change_reports_enclosing_function(repo):
 
 
 def test_closure_constant_and_added_file(repo):
-    res = compare(Options())
+    res = compare(Options(exts=("py",)))
     assert keys(res) == {"pkg/mod.py": ["<module>", "B.run"], "pkg/sub/deep.py": ["d"]}
     module = res.files[0].units[0]
     assert [r.tag + r.line.text for r in module.rows] == ["-X = 1", "+X = 2"]   # imports untouched
@@ -203,14 +203,14 @@ def test_rename_delete_and_syntax_error(repo):
 
 # -- output -----------------------------------------------------------------------------------------
 def test_report_name_markdown_and_index(repo):
-    res = write(compare(Options()))
+    res = write(compare(Options(exts=("py",))))
     assert res.report == repo.root / ".giddy" / "main_0003_0002_py.md"
     md = res.report.read_text()
     assert read_meta(res.report)["new"]["index"] == 3
     assert md.count("<details open>") == 2 and md.count("<details>") == 1    # 2 units + new file
     assert "```diff\n@@ -25,4 +25,4 @@ B.run()\n     def run(self, a):" in md
     assert "```python\ndef d():\n    return 0\n```" in md
-    closed = compare(Options(open_max=0)).markdown
+    closed = compare(Options(exts=("py",), open_max=0)).markdown
     assert "<details open>" not in closed and "<pre>-        return inner(a) + 1" not in closed
     assert "<pre>-            return z * 2\n+            return z * 3</pre>" in closed
     assert "](../pkg/mod.py#L" in md and '](#f1)' in md
@@ -218,7 +218,7 @@ def test_report_name_markdown_and_index(repo):
     repo.write("pkg/sub/deep.py", "def d():\n    return 5\n")
     repo("add", "-A")
     os.chdir(repo.root / "pkg" / "sub")
-    staged = write(compare(Options(new="S")))
+    staged = write(compare(Options(new="S", exts=("py",))))
     assert staged.report.name == "_main_S_0003_pkg-sub_py.md"
 
     index = (repo.root / ".giddy" / "commits.md").read_text()
@@ -251,3 +251,28 @@ def test_one_line_class_crlf_and_empty_repo(tmp_path, monkeypatch):
     cls, fn = res.files[0].units
     assert [l.text for l in cls.full_code()] == ["class A: x = 1"]
     assert [l.text for l in fn.full_code()] == ["def f():", "    return 1"]
+
+
+def test_nearest_code_changes_when_empty(repo, capsys):
+    assert main(["2", "-e", "py"]) == 0                     # 0002 changed docstrings only
+    out = capsys.readouterr().out.splitlines()
+    assert out[0] == "giddy: no code changes 0002 <- 0001 under '.' [py]"
+    assert out[1] == "giddy: previous code change: 0001 " + repo("rev-parse", "--short", "HEAD~2") + " c1: B.run"
+    assert out[2].startswith("giddy: next code change: 0003 ")
+
+    assert main(["2", "-e", "rs"]) == 0                     # lib.rs first appears in 0003
+    out = capsys.readouterr().out.splitlines()
+    assert out[1:] == ["giddy: previous code change: none", out[2]] and " 0003 " in out[2]
+
+    repo.write("pkg/sub/deep.py", 'def d():\n    """doc"""\n    return 0\n')
+    repo.commit("c4: docstring")                            # 0004: no code change at HEAD
+    assert main([]) == 0
+    out = capsys.readouterr().out.splitlines()
+    assert out[0] == "giddy: no code changes 0004 <- 0003 under '.'"
+    assert out[1].startswith("giddy: last code change under '.': 0003 ") and len(out) == 2
+
+    repo.write("pkg/sub/deep.py", 'def d():\n    """doc 2"""\n    return 0\n')
+    repo("add", "-A")
+    assert main(["S", "-p", "pkg/sub"]) == 0                # staged docstring edit; 0004 skipped too
+    out = capsys.readouterr().out.splitlines()
+    assert out[1].startswith("giddy: last code change under 'pkg/sub': 0003 ")

@@ -151,6 +151,19 @@ def changed_paths(repo: Repo, new: Snapshot, old: Snapshot, pathspec: str,
     return sorted(out, key=lambda r: r[1])
 
 
+def matches_ext(path: str, exts: tuple[str, ...] | None) -> bool:
+    """True when `exts` is empty or the file name ends in `.<ext>` for one of them (case-insensitive)."""
+    if not exts:
+        return True
+    name = path.rsplit("/", 1)[-1].lower()
+    return any(name.endswith("." + e) for e in exts)
+
+
+def is_reported(fc: FileChange) -> bool:
+    """A file enters a report when it has a changed unit, is binary, or was deleted."""
+    return bool(fc.units) or fc.note == "binary" or fc.status == "D"
+
+
 def _decode(data: bytes | None) -> str | None:
     return None if data is None else data.decode("utf-8", "replace")
 

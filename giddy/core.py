@@ -6,11 +6,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import __version__
-from .diffing import FileChange, changed_paths, compare_file
+from .diffing import FileChange, changed_paths, compare_file, is_reported, matches_ext
 from .git import GiddyError, Repo
 from .index import report_name, write_index
 from .render import render
-from .snapshots import describe, resolve_pair
+from .history import last_change, next_change
+from .snapshots import Snapshot, describe, resolve_pair
 
 ENV_OUT = "GIDDY_DIR"
 DEFAULT_DIR = ".giddy"
@@ -21,7 +22,7 @@ class Options:
     new: str | None = None              # first comparison point; None => HEAD
     old: str | None = None              # second comparison point; None => previous of `new`
     path: str = "."                     # folder or file filter, relative to cwd or absolute
-    exts: tuple[str, ...] | None = ("py",)  # None => every file
+    exts: tuple[str, ...] | None = None # None => every file
     code_only: bool = True
     context: int = 3
     untracked: bool = False
@@ -49,13 +50,6 @@ def _pathspec(repo: Repo, path: str) -> str:
     return rel.as_posix() or "."
 
 
-def _matches(path: str, exts: tuple[str, ...] | None) -> bool:
-    if not exts:
-        return True
-    name = path.rsplit("/", 1)[-1].lower()
-    return any(name.endswith("." + e) for e in exts)
-
-
 def output_target(repo: Repo, out: str | None) -> tuple[Path, str | None]:
     """(directory, explicit file name or None)."""
     raw = out or os.environ.get(ENV_OUT)
@@ -77,10 +71,10 @@ def compare(opts: Options) -> Result:
 
     files, skipped = [], []
     for status, path, old_path in changed_paths(repo, new, old, pathspec, opts.untracked):
-        if not (_matches(path, exts) or (old_path and _matches(old_path, exts))):
+        if not (matches_ext(path, exts) or (old_path and matches_ext(old_path, exts))):
             continue
         fc = compare_file(repo, new, old, status, path, old_path, opts.code_only, opts.context)
-        if fc.units or fc.note == "binary" or fc.status == "D":
+        if is_reported(fc):
             files.append(fc)
         else:
             skipped.append(path)
@@ -91,6 +85,25 @@ def compare(opts: Options) -> Result:
     outdir, explicit = output_target(repo, opts.out)
     md = render(meta, files, skipped, repo.root, outdir, opts.open_max)
     return Result(md, meta, files, skipped, repo, outdir / (explicit or report_name(meta)))
+
+
+def nearest_changes(result: Result) -> dict[str, tuple[Snapshot | None, bool]]:
+    """Code changes around an empty comparison, under the same path, extensions and mode.
+
+    "previous": newest code change at or before the old side (HEAD for S/U against HEAD).
+    "next": oldest code change after the new side; only when the new side is a commit other than HEAD.
+    Each value: (commit snapshot or None, True when the search stopped at history.LIMIT candidates).
+    """
+    repo, meta = result.repo, result.meta
+    assert repo is not None
+    exts = tuple(meta["exts"]) if meta["exts"] else None
+    args = (meta["path"], exts, meta["code_only"])
+    new, old = meta["new"], meta["old"]
+    out: dict[str, tuple[Snapshot | None, bool]] = {}
+    out["previous"] = last_change(repo, old["sha"], *args) if old["kind"] == "commit" else (None, False)
+    if new["kind"] == "commit" and new["sha"] != repo.head:
+        out["next"] = next_change(repo, new["sha"], *args)
+    return out
 
 
 def write(result: Result, index: bool = True) -> Result:

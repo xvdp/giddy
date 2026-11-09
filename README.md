@@ -24,12 +24,12 @@ Requires Python >= 3.9 and git. Python parsed by running interpreter: newer synt
 ## Usage
 
 ```bash
-giddy   # Defaults: diff HEAD vs its parent, .py files, under '.' cwd, write to:
+giddy   # Defaults: diff HEAD vs its parent, all files, under '.' cwd, write to:
         # git_root/.giddy/`<branch>_<commitindex>_<previndex>_<folder>_<filters>.md`
 giddy -10 HEAD  # 2 entries: HEAD vs 10 commits back
-        # -N | ~N   Nth ancestor
+        # -<int> | ~<int>   Nth ancestor
 giddy S # one commit entry for (S | U) compares to HEAD
-        # S | staged | cached | index       'git add' staged changes
+        # 'S' | staged | cached | index       'git add' staged changes
 
 # filter by path
 giddy U 0042 -p src/ops    # unstaged files vs 42nd commit, files under src/ops
@@ -40,15 +40,15 @@ giddy U 0042 -p src/ops    # unstaged files vs 42nd commit, files under src/ops
 # file type filters
 giddy a1b2c3 -e py,rs   # commit a1b2c3 vs parent, .py and .rs files
         # SHA-1             commit by SHA-1 hash against parent
-        # -e | --ext        filter by extension ( default .py)
+        # -e | --ext        filter by extension ( default 'all')
     giidy -e py,rs      # only python and rust
     giddy -e all        # every file
 
 # Ouptut control
-giddy 1 --stdout    # commit 1 vs commit 0, print only, no .md written
-        # --stdout  # print only
+giddy 1 --stdout    # commit 1 vs commit 0
+                    # --stdout  # print only
 giddy -o `<path>.md`
-        # -o | --out    overrides default dir [git root/.giddy]
+        # -o | --out    overrides default dir [git root/.giddy/] and .md file
 giddy -C 5          # show 5 context lines on non-Python files (default: 3)
         # -C | --context
 giddy --open 10     # fold output on functions > 10 lines (default: 40)
@@ -61,20 +61,24 @@ Writes diff .md:  `<output dir>`/`<branch>_<commitindex>_<oldercommitindex>_<fol
 
 Default output_dir: `<git project root>`/`.giddy/`. Can be overridden `-o <path>/<name>`
 
-Writes commit table: `<output dir>`/`commits.md`, listed by a `%04d_hash` (commit_index, SHA-1 hash).
+Writes commit table: `<output dir>`/`commits.md`, listed by a `(commit_index)%04d_<SHA-1 hash>`.
+
+If no code change found, nothing is written and the nearest code change with same path and ext is listed.
+
 </samp>
+
+
 | commit | date | subject | reports |
 |---|---|---|---|
 | `0207_ec5ea73` | YY-MM-DD | ... | `links to diff .md` |
 
 **Commit entry options**
 ```bash
-U | unstaged | worktree | wt    # unstaged files
-S | staged | cached | index     # files staged with `git add`
-HEAD | HEAD-<int> | HEAD~<int>
-<SHA-1 hash>    # short or long hash
-<int>           # commit index starting with 0
-<-int>          # parent distance to HEAD
+U | unstaged | worktree | wt        # unstaged files
+S | staged | cached | index         # files staged with `git add`
+HEAD | HEAD~<int> | <-int> | <~int> # <int>th ancestor of HEAD 
+<SHA-1 hash>                        # short or long hash
+<int>                               # commit index starting with 0
 
 hash, partial hash, branch, tag, HEAD~<int> # processed with git rev-parse
 ```
@@ -101,7 +105,7 @@ Overloads:  keyed with parameter list, e.g. `spacing(g::Grid, i)`.
 Non-python:  use shared tokenizer and brace|end matcher in ./giddy/lang/ with no dependencies.
 Directives  #if|#elif|#else`:  followed along the first branch, includes tokens in other branches.
 ```
-On parsing fail, returns line diff tagged `parse failed`.
+On parsing fail, returns a line diff tagged `parse failed`.
 
 **Adding a language:**
 
