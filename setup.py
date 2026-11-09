@@ -19,5 +19,5 @@ setup(
     author='xvdp',
     python_requires='>=3.9',
     package_dir={name: name,},
-    version=_set_version(version='0.0.1')
+    version=_set_version(version='0.0.2')
 )

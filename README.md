@@ -95,17 +95,6 @@ A function appears whole, nested closures and lambdas included. Code-only mode c
 
 Non-Python languages use one shared tokenizer and brace/`end` matcher in `giddy/lang/` with no dependencies. C-family preprocessor `#if`/`#elif`/`#else` branches are followed along the first possible branch for structure; tokens in the other branches still count as changes. A file whose brackets or blocks do not balance falls back to a line diff, marked `parse failed` in the report.
 
-Parse rate on files at HEAD:
-
-| corpus | language | files parsed |
-|---|---|---|
-| Meromorph/ceen | Rust, TS, JS | 231/231 |
-| sdfx | Slang | 9/9 |
-| stochasticsplats | GLSL | 29/29 |
-| libjpeg-turbo | C | 240/240 |
-| faiss | C++, CUDA | 788/788 |
-| pbrt-v4 | C++ | 213/213 |
-| Oceananigans.jl | Julia | 667/668 (the one failure is invalid Julia) |
 
 Adding a language: subclass `Adapter` (`giddy/lang/base.py`), or add a `CSpec` entry for a brace language (`giddy/lang/clike.py`), then register its extensions in `giddy/lang/__init__.py`.
 
