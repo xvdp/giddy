@@ -58,6 +58,11 @@ def _anchor_sha(meta: dict) -> str | None:
 def _cell(text: str) -> str:
     return text.replace("|", "\\|")
 
+def _dotdate(date: str) -> str:
+    return date.replace('-','.')
+
+def _joinone(exts: list | None = None, joint: str = ',.'):
+    return '' if exts is None else joint.join(exts)
 
 def write_index(repo: Repo, outdir: Path) -> Path:
     """Rebuild `outdir/commits.md` from the metadata line of every report in `outdir`.
@@ -95,8 +100,10 @@ def write_index(repo: Repo, outdir: Path) -> Path:
         rows = commits[branch]
         out += [f"## {branch} ({len(rows)} commits)", "", "| commit | date | subject | reports |", "|---|---|---|---|"]
         for c in reversed(rows):
-            cell = " · ".join(f"[{m['new']['label']}←{m['old']['label']}]({n})" for n, m in links.get((branch, c["sha"]), []))
-            out.append(f"| {c['index']:04d}_{c['short']} | {c['date']} | {_cell(c['subject'])} | {cell} |")
+            # cell = " · ".join(f"[{m['new']['label']}←{m['old']['label']}]({n})" for n, m in links.get((branch, c["sha"]), []))
+            cell = " · ".join(f"[{m['new']['label']}←{m['old']['label']}_{m['path']}/*.{_joinone(m['exts'])}]({n})"
+                              for n, m in links.get((branch, c["sha"]), []))
+            out.append(f"| {c['index']:04d}_{c['short']} | {_dotdate(c['date'])} | {_cell(c['subject'])} | {cell} |")
         out.append("")
     if rest:
         out += ["## Other reports", ""] + [f"- [{n}]({n})" for n in rest] + [""]

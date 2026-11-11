@@ -23,6 +23,7 @@ from urllib.parse import quote
 
 from .diffing import FileChange, UnitChange
 from .lang import Line
+from .index import INDEX_NAME
 
 SUMMARY_LINES = 8
 OPEN_MAX = 40
@@ -108,7 +109,7 @@ def render(meta: dict, files: list[FileChange], skipped: list[str], root: Path, 
            open_max: int = OPEN_MAX) -> str:
     new, old = meta["new"], meta["old"]
     out = [f"<!-- giddy {json.dumps(meta, separators=(',', ':'))} -->",
-           f"# {meta['branch']} · {new['label']} ← {old['label']}", "",
+           f"# {meta['branch']} · {new['label']} ← {old['label']}", f"[commits index]({INDEX_NAME})",
            "| side | snapshot | commit | date | subject |", "|---|---|---|---|---|"]
     for side, s in (("new", new), ("old", old)):
         name = {"index": "staged", "worktree": "unstaged", "empty": "empty tree"}.get(s["kind"], s["label"])
