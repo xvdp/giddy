@@ -100,3 +100,31 @@ def test_api(pkg, tmp_path):
     assert "`src/pkg/core.py:17` · `Engine.step(self)`" in rep.markdown
     with pytest.raises(Exception):
         call_stack("pkg.nothing", paths=("src",))
+
+
+def test_external_callers_and_order(pkg):
+    pkg.write("src/pkg/util.py", "def helper(x):\n    return x + 1\n")
+    pkg.commit("c1")
+    md = compare(Options(path="src", scripts=("scripts", "docs"))).markdown
+    tree = md[md.index("<pre>"):md.index("</pre>")].splitlines()
+    run = next(i for i, l in enumerate(tree) if ">app.run()<" in l)
+    assert tree[run + 1].endswith('── ... <a href="../docs/guide.md#L5" target="_blank" rel="noopener">'
+                                  '<i>docs/guide.md fence L4</i></a>')
+    assert tree[run + 2].endswith('── ... <a href="../scripts/go.py#L4" target="_blank" rel="noopener">'
+                                  '<i>scripts/go (module)</i></a>')
+    assert ">core.Engine.setup()<" in tree[run + 3]          # internal sibling of app.run, after its subtree
+
+
+def test_recursion_first_and_external_indent():
+    from pathlib import Path
+    from giddy.callgraph import CallGraph, TreeWriter
+    g = CallGraph()
+    g.add_source("m", "m.py", "def f():\n    zrec()\n\ndef zrec():\n    f()\n\ndef alpha():\n    f()\n")
+    g.add_source("s", "/ext/s.py", "import m\n\ndef top():\n    m.f()\n\ndef outer():\n    top()\n",
+                 origin="ext", rel="s.py")
+    g.resolve()
+    text, _ = TreeWriter(g, Path("/"), Path("/"), {}).tree("m.f")
+    import re
+    rows = [re.sub(r"<[^>]+>", "", l) for l in text.splitlines()[2:-1]]
+    assert rows == ["├── m.zrec()", "│   └── m.f()  ↻", "├── m.alpha()", "└── ... ext/s.top()",
+                    "        └── ext/s.outer()"]

@@ -17,7 +17,7 @@ Calls passed as values (`map(f, xs)`, callbacks) are not calls and are not trace
 
 Trees
     A tree lists the callers of a root definition, then their callers, recursively: an incoming call
-    hierarchy. Calls to `C.__init__` include calls to `C`. Changed definitions are processed from the
+    hierarchy. Calls to `C.__init__` include calls to `C`. Changed definitions are processed from
     lowest call level up: level 0 calls no other changed definition, level k calls one of level k-1.
     A changed definition that appears in an earlier tree is bold there and gets no tree of its own.
 """
@@ -33,9 +33,9 @@ from pathlib import Path, PurePosixPath
 
 from .git import GiddyError, Repo
 
-MAX_DEPTH = 8
-MAX_LINES = 300
-NEW_TAB = ' target="_blank" rel="noopener"'   # honoured by browsers; GitHub strips it, VSCode opens files in the editor
+MAX_DEPTH = 16
+MAX_LINES = 500
+NEW_TAB = ' target="_blank" rel="noopener"'   # ok browsers and vscode; github strips it
 FENCE = re.compile(r"^(\s*)(`{3,}|~{3,})\s*(python|py|python3)\b[^\n]*\n(.*?)^\1\2\s*$", re.M | re.S)
 
 
@@ -50,6 +50,8 @@ class Def:
     args: str = ""
     cls: str | None = None      # owning class id for methods
     bases: list[tuple[str, ...]] = field(default_factory=list)
+    origin: str | None = None   # `-s` argument as passed, for definitions found only under it
+    rel: str = ""               # file path relative to that argument
 
 
 @dataclass
@@ -64,6 +66,8 @@ class _Module:
     name: str
     path: str
     line0: int                  # line offset of a markdown fence
+    origin: str | None = None
+    rel: str = ""
     imports: dict[str, str] = field(default_factory=dict)
     top: dict[str, str] = field(default_factory=dict)          # top-level name -> def id
     raw: list[tuple[str, tuple[str, ...], int, str | None]] = field(default_factory=list)
@@ -83,7 +87,12 @@ class _Collector(ast.NodeVisitor):
     def __init__(self, graph: "CallGraph", mod: _Module):
         self.g, self.m = graph, mod
         self.stack: list[Def] = []
-        self.module_def = graph.add(Def(f"{mod.name}.<module>", mod.name, "<module>", "module", mod.path, mod.line0 + 1))
+        self.module_def = self.add(Def(f"{mod.name}.<module>", mod.name, "<module>", "module",
+                                        mod.path, mod.line0 + 1))
+
+    def add(self, d: Def) -> Def:
+        d.origin, d.rel = self.m.origin, self.m.rel
+        return self.g.add(d)
 
     def scope(self) -> Def:
         return self.stack[-1] if self.stack else self.module_def
@@ -99,8 +108,8 @@ class _Collector(ast.NodeVisitor):
             self.generic_visit(node)
             return
         q = self.qual(node.name)
-        d = self.g.add(Def(f"{self.m.name}.{q}", self.m.name, q, "class", self.m.path, self.m.line0 + node.lineno,
-                           bases=[_chain(b) for b in node.bases]))
+        d = self.add(Def(f"{self.m.name}.{q}", self.m.name, q, "class", self.m.path,
+                           self.m.line0 + node.lineno, bases=[_chain(b) for b in node.bases]))
         if not self.stack:
             self.m.top[node.name] = d.id
         self.stack.append(d)
@@ -117,7 +126,7 @@ class _Collector(ast.NodeVisitor):
             args = ast.unparse(node.args)
         except Exception:                                   # pragma: no cover
             args = ""
-        d = self.g.add(Def(f"{self.m.name}.{q}", self.m.name, q, "function", self.m.path,
+        d = self.add(Def(f"{self.m.name}.{q}", self.m.name, q, "function", self.m.path,
                            self.m.line0 + node.lineno, args, owner))
         if not self.stack:
             self.m.top[node.name] = d.id
@@ -167,12 +176,13 @@ class CallGraph:
         return d
 
     # -- building -------------------------------------------------------------------------------
-    def add_source(self, module: str, path: str, source: str, line0: int = 0) -> None:
+    def add_source(self, module: str, path: str, source: str, line0: int = 0,
+                   origin: str | None = None, rel: str = "") -> None:
         try:
             tree = ast.parse(source)
         except (SyntaxError, ValueError):
             return
-        mod = _Module(module, path, line0)
+        mod = _Module(module, path, line0, origin, rel)
         self.modules[module] = mod
         _Collector(self, mod).visit(tree)
 
@@ -189,7 +199,7 @@ class CallGraph:
         return self
 
     def _module_of(self, dotted: str) -> tuple[str | None, list[str]]:
-        """Longest indexed module prefix of `dotted` (suffix match for src layouts), and the rest."""
+        """Longest indexed module prefix of `dotted` (suffix match for src layouts)."""
         parts = dotted.split(".")
         for k in range(len(parts), 0, -1):
             name = ".".join(parts[:k])
@@ -236,7 +246,11 @@ class CallGraph:
                     out.append(tid)
         return out
 
-    def _mro_find(self, cls_id: str, name: str, skip_self: bool = False, seen: set | None = None) -> str | None:
+    def _mro_find(self,
+                  cls_id: str,
+                  name: str,
+                  skip_self: bool = False,
+                  seen: set | None = None) -> str | None:
         seen = seen or set()
         if cls_id in seen:
             return None
@@ -257,7 +271,10 @@ class CallGraph:
             return ".".join((mod.imports[head],) + chain[1:])
         return None
 
-    def _target(self, mod: _Module, chain: tuple[str, ...], cls: str | None) -> tuple[str | None, bool]:
+    def _target(self,
+                mod: _Module,
+                chain: tuple[str, ...],
+                cls: str | None) -> tuple[str | None, bool]:
         if chain[0] in ("self", "cls") and len(chain) == 2 and cls:
             return self._mro_find(cls, chain[1]), False
         if chain[0] == "super()" and len(chain) == 2 and cls:
@@ -290,7 +307,7 @@ class CallGraph:
         return out
 
 
-# -- loading ----------------------------------------------------------------------------------------
+# -- loading ---------------------------------------------------------------------------------------
 def module_name(path: str, exists) -> str:
     """Dotted module name from the package layout: parents holding `__init__.py` are packages."""
     p = PurePosixPath(path)
@@ -318,25 +335,28 @@ class Scope:
     kind: str = "worktree"                  # commit | index | worktree
     sha: str | None = None
     paths: tuple[str, ...] = (".",)         # .py files under these, repo-relative or absolute
-    scripts: tuple[str, ...] = ()           # .py files and ```python fences in .md files under these
+    scripts: tuple[str, ...] = ()           # .py files and ```python fences in .md
 
     def build(self) -> CallGraph:
         repo, g = self.repo, CallGraph()
         listed = set(repo.files(self.kind, self.sha))
         exists = (lambda p: p in listed)
-        wanted: dict[str, bool] = {}                        # repo path -> markdown allowed
-        outside: list[tuple[Path, bool]] = []
+        wanted: dict[str, tuple[str | None, str]] = {}     # repo path -> (`-s` origin, path under it)
+        outside: list[tuple[Path, str | None]] = []
         for folder, md in [(p, False) for p in self.paths] + [(p, True) for p in self.scripts]:
             full = Path(folder).expanduser().resolve()
             try:
                 rel = full.relative_to(repo.root).as_posix()
             except ValueError:
-                outside.append((full, md))
+                outside.append((full, folder if md else None))
                 continue
             prefix = "" if rel in ("", ".") else rel.rstrip("/") + "/"
             for f in listed:
-                if (f == rel or f.startswith(prefix)) and (f.endswith(".py") or (md and f.endswith(".md"))):
-                    wanted[f] = wanted.get(f, False) or md
+                if f in wanted or not (f == rel or f.startswith(prefix)):
+                    continue
+                if f.endswith(".py") or (md and f.endswith(".md")):
+                    under = f[len(prefix):] if f != rel else PurePosixPath(f).name
+                    wanted[f] = (folder, under) if md else (None, "")
         names = sorted(wanted)
         if self.kind == "worktree":
             blobs = [self._disk(repo.root / f) for f in names]
@@ -345,14 +365,16 @@ class Scope:
             blobs = repo.blobs([prefix + f for f in names])
         for f, data in zip(names, blobs):
             if data is not None:
-                self._add(g, f, data.decode("utf-8", "replace"), exists)
-        for folder, md in outside:
+                self._add(g, f, data.decode("utf-8", "replace"), exists, *wanted[f])
+        for folder, origin in outside:
             files = [folder] if folder.is_file() else sorted(folder.rglob("*"))
             for f in files:
-                if f.suffix == ".py" or (md and f.suffix == ".md"):
+                if f.suffix == ".py" or (origin is not None and f.suffix == ".md"):
                     data = self._disk(f)
                     if data is not None:
-                        self._add(g, str(f), data.decode("utf-8", "replace"), lambda p: Path(p).exists())
+                        under = f.name if folder.is_file() else f.relative_to(folder).as_posix()
+                        self._add(g, str(f), data.decode("utf-8", "replace"),
+                                  lambda p: Path(p).exists(), origin, under)
         return g.resolve()
 
     @staticmethod
@@ -363,15 +385,15 @@ class Scope:
             return None
 
     @staticmethod
-    def _add(g: CallGraph, path: str, text: str, exists) -> None:
+    def _add(g: CallGraph, path: str, text: str, exists, origin: str | None = None, rel: str = "") -> None:
         if path.endswith(".md"):
             for line0, code in _fences(text):
-                g.add_source(f"{path}#L{line0 + 1}", path, code, line0)
+                g.add_source(f"{path}#L{line0 + 1}", path, code, line0, origin, rel)
         else:
-            g.add_source(module_name(path, exists), path, text)
+            g.add_source(module_name(path, exists), path, text, 0, origin, rel)
 
 
-# -- rendering --------------------------------------------------------------------------------------
+# -- rendering -------------------------------------------------------------------------------------
 @dataclass
 class Root:
     id: str
@@ -379,8 +401,18 @@ class Root:
 
 
 def display(g: CallGraph, did: str) -> str:
-    """`gett.stack.RenderStack.reference()`: module without its top package, qualname, `()` for functions."""
+    """`submodule.ClassName.method()`: module w/o top package, qualname, `()` for functions."""
     d = g.defs[did]
+    if d.origin is not None:                        # `-s` caller: path as passed, then file and qualname
+        folder = d.origin.rstrip("/")
+        base = folder[:-3] if folder.endswith(".py") and PurePosixPath(folder).name == d.rel else \
+            f"{folder}/{d.rel[:-3] if d.rel.endswith('.py') else d.rel}"
+        if d.rel.endswith(".md"):
+            base += f" fence L{d.line}"
+            return base if d.kind == "module" else f"{base} {d.qual}()"
+        if d.kind == "module":
+            return f"{base} (module)"
+        return f"{base}.{d.qual}" + ("()" if d.kind == "function" else "")
     if "#L" in d.module or d.module.endswith((".py", ".md")) or "/" in d.module:
         base = d.path + (f" fence L{d.line}" if d.path.endswith(".md") else "")
         return base if d.kind == "module" else f"{base} {d.qual}()"
@@ -399,18 +431,21 @@ def _href(root: Path, outdir: Path, path: str, line: int) -> str:
 class TreeWriter:
     def __init__(self, g: CallGraph, root: Path, outdir: Path, changed: dict[str, str]):
         self.g, self.root, self.outdir, self.changed = g, root, outdir, changed
+        self._up: dict[str, set[str]] = {}
 
     def caller(self, cid: str, sites: list[Site]) -> str:
         """Caller name linked to its first call site; further call sites as `+L<n>` links."""
         c = self.g.defs[cid]
-        link = lambda s, t: f'<a href="{_href(self.root, self.outdir, c.path, s.line)}"{NEW_TAB}>{t}</a>'
-        text = link(sites[0], html.escape(display(self.g, cid)))
+        def link(s: Site, t: str) -> str:
+            return f'<a href="{_href(self.root, self.outdir, c.path, s.line)}"{NEW_TAB}>{t}</a>'
+        name = html.escape(display(self.g, cid))
+        text = link(sites[0], f"<i>{name}</i>" if c.origin is not None else name)
         if cid in self.changed:
             text = f"<b>{text}</b> <i>{self.changed[cid]}</i>"
         if all(s.inferred for s in sites):
             text += " ~"
         extra = " ".join(link(s, f"+L{s.line}") for s in sites[1:4])
-        return text + (" " + extra if extra else "") + (f" +{len(sites) - 4}" if len(sites) > 4 else "")
+        return text + (" "+extra if extra else "")+(f" +{len(sites) - 4}" if len(sites) > 4 else "")
 
     def tree(self, rid: str) -> tuple[str, set[str]]:
         """`<pre>` incoming-call tree of `rid` and the changed definitions shown in it."""
@@ -419,19 +454,43 @@ class TreeWriter:
         tag = f" <i>{self.changed[rid]}</i>" if rid in self.changed else ""
         lines = [f'<b><a href="{href}"{NEW_TAB}>{html.escape(display(self.g, rid))}</a></b>{tag}']
         shown, seen = set(), {rid}
-        self._walk(rid, "", 1, {rid}, seen, lines, shown)
+        self._walk(rid, "", 1, {rid}, seen, lines, shown, False)
         if len(lines) == 1:
             lines.append("└── (no callers in scope)")
         return "<pre>\n" + "\n".join(lines) + "\n</pre>", shown
 
-    def _walk(self, did, prefix, depth, ancestors, seen, lines, shown) -> None:
-        callers = sorted(self.g.incoming(did).items(), key=lambda kv: display(self.g, kv[0]))
+    def upstream(self, did: str) -> set[str]:
+        """Every transitive caller of `did`."""
+        if did not in self._up:
+            seen, todo = set(), [did]
+            while todo:
+                for c in self.g.incoming(todo.pop()):
+                    if c not in seen:
+                        seen.add(c)
+                        todo.append(c)
+            self._up[did] = seen
+        return self._up[did]
+
+    def order(self, did: str, ancestors: set[str]) -> list[tuple[str, list[Site]]]:
+        """Callers of `did`: internal before `-s` callers; within each, a caller already on the path
+        (recursion) first, then callers whose own callers lead back onto the path, then by name."""
+        def key(kv):
+            cid = kv[0]
+            rank = 0 if cid in ancestors else 1 if self.upstream(cid) & ancestors else 2
+            return (self.g.defs[cid].origin is not None, rank, display(self.g, cid))
+        return sorted(self.g.incoming(did).items(), key=key)
+
+    def _walk(self, did, prefix, depth, ancestors, seen, lines, shown, ext) -> None:
+        """`ext`: inside an `-s` branch. Its first caller is marked `... `; callers above it are
+        indented four more spaces so they align with the text after the mark."""
+        callers = self.order(did, ancestors)
         for k, (cid, sites) in enumerate(callers):
             if len(lines) >= MAX_LINES:
                 lines.append(prefix + "└── … truncated")
                 return
             last = k == len(callers) - 1
             text = self.caller(cid, sorted(sites, key=lambda s: s.line))
+            enter = self.g.defs[cid].origin is not None and not ext
             if cid in self.changed:
                 shown.add(cid)
             expand = False
@@ -444,10 +503,10 @@ class TreeWriter:
             else:
                 expand = True
                 seen.add(cid)
-            lines.append(prefix + ("└── " if last else "├── ") + text)
+            lines.append(prefix + ("└── " if last else "├── ") + ("... " if enter else "") + text)
             if expand:
-                self._walk(cid, prefix + ("    " if last else "│   "), depth + 1, ancestors | {cid}, seen,
-                           lines, shown)
+                inner = prefix + ("    " if last else "│   ") + ("    " if enter else "")
+                self._walk(cid, inner, depth + 1, ancestors | {cid}, seen, lines, shown, ext or enter)
 
 
 def _reach(g: CallGraph, start: str, members: set[str]) -> set[str]:
@@ -497,15 +556,20 @@ def trees(g: CallGraph, roots: list[Root], root: Path, outdir: Path) -> list[tup
 
 
 def _details(summary: str, body: str, is_open: bool = False) -> str:
-    return "\n".join(["<details open>" if is_open else "<details>", f"<summary>{summary}</summary>", "",
-                      body, "", "</details>"])
+    return "\n".join(["<details open>" if is_open else "<details>", f"<summary>{summary}</summary>",
+                      "", body, "", "</details>"])
 
 
-# -- entry points -----------------------------------------------------------------------------------
-def report_section(repo: Repo, snapshot: dict, files, paths: tuple[str, ...], scripts: tuple[str, ...],
+# -- entry points ----------------------------------------------------------------------------------
+def report_section(repo: Repo,
+                   snapshot: dict,
+                   files,
+                   paths: tuple[str, ...],
+                   scripts: tuple[str, ...],
                    outdir: Path) -> str:
     """Folded "Call trees" section for the added and modified Python units of a report."""
-    py = [fc for fc in files if fc.path.endswith((".py", ".pyi")) and fc.status != "D" and fc.full_code]
+    py = [fc for fc in files if
+          fc.path.endswith((".py", ".pyi")) and fc.status != "D" and fc.full_code]
     if not py:
         return ""
     kind = snapshot["kind"] if snapshot["kind"] in ("commit", "index") else "worktree"
@@ -535,10 +599,19 @@ def report_section(repo: Repo, snapshot: dict, files, paths: tuple[str, ...], sc
             return p
     where = ", ".join(f"<code>{html.escape(rel(p))}</code>" for p in paths + scripts)
     summary = f"Call trees · {len(built) - len(lone)} trees · scope {where}"
-    legend = ("callers of each root, links to the call sites · <b>bold</b> changed in this diff · "
-              "~ resolved by method name only · ↑ expanded above · ↻ recursion · … depth limit")
-    body = legend + "\n\n" + "\n\n".join(blocks)
-    return "\n".join(['<a id="calls" name="calls"></a>', "", "## Call trees", "", _details(summary, body, is_open=True)])
+
+    legend = ("| function | tag | meaning |", "| --- | --- | --- |",
+              "| <b>bold_func()</b> ||  changed in this git diff |",
+              "| <i>ital_func()</i> || external caller |",
+              "| any | ↻ | recursion |",
+              "| any | ~ | resolved by method name only |",
+              "| any | ↑ | mult calls |",
+              f"| any | … | call stack > max depth {MAX_DEPTH} |",
+              f"| … || calls > max lines {MAX_LINES} |")
+
+    body = "\n".join(legend) + "\n\n" + "\n\n".join(blocks)
+    return "\n".join(['<a id="calls" name="calls"></a>', "", "## Call trees", "",
+                      _details(summary, body, is_open=True)])
 
 
 def writer_name(g: CallGraph, r: Root) -> str:
@@ -567,9 +640,11 @@ def _resolve_spec(g: CallGraph, spec, root: Path) -> str:
         hits = [d.id for d in g.defs.values() if d.path in (rel, str(full)) and d.qual == qual]
     else:
         hit = g.lookup(text)
-        hits = [hit] if hit else [d.id for d in g.defs.values() if d.id.endswith("." + text) or d.qual == text]
+        hits = [hit] if hit else [d.id for d in g.defs.values() if
+                                  d.id.endswith("." + text) or d.qual == text]
     if len(hits) != 1:
-        raise GiddyError(f"{spec}: {'not found in scope' if not hits else 'ambiguous: ' + ', '.join(hits[:5])}")
+        why = "not found in scope" if not hits else "ambiguous: " + ", ".join(hits[:5])
+        raise GiddyError(f"{spec}: {why}")
     return hits[0]
 
 
@@ -606,16 +681,19 @@ def call_stack(functions, out: str | os.PathLike | None = None, paths=(".",), sc
     outdir = Path(out).expanduser().resolve() if out is not None else Path.cwd()
     built = trees(g, [Root(i) for i in ids], repo.root, outdir)
     lines = [f"# Call trees · {repo.root.name}", "",
-             f"snapshot `{snapshot}` · scope " + ", ".join(f"`{p}`" for p in tuple(paths) + tuple(scripts)), ""]
+             f"snapshot `{snapshot}` · scope " + ", ".join(f"`{p}`" for p in
+                                                           tuple(paths) + tuple(scripts)), ""]
     for r, text in built:
         d = g.defs[r.id]
         sig = f"({d.args})" if d.kind == "function" else ""
-        lines += [f"## {display(g, r.id)}", "", f"`{d.path}:{d.line}` · `{d.qual}{sig}`", "", text, ""]
+        lines += [f"## {display(g, r.id)}", "", f"`{d.path}:{d.line}` · `{d.qual}{sig}`", "", text,
+                  ""]
     md = "\n".join(lines).rstrip() + "\n"
     path = None
     if out is not None:
         outdir.mkdir(parents=True, exist_ok=True)
-        stem = re.sub(r"[^\w.-]+", "-", display(g, ids[0]).rstrip("()")) + (f"+{len(ids) - 1}" if len(ids) > 1 else "")
+        stem = re.sub(r"[^\w.-]+", "-", display(g, ids[0]).rstrip("()")) + (f"+{len(ids) - 1}"
+                                                                            if len(ids) > 1 else "")
         path = outdir / f"calls_{stem}.md"
         path.write_text(md, encoding="utf-8")
     return CallReport(md, path)
