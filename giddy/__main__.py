@@ -19,6 +19,8 @@ examples:
   giddy a1b2c3d -e py,rs    commit a1b2c3d vs its parent, .py and .rs files
 
 reports go to <repo root>/.giddy/ (or $GIDDY_DIR, or --out); commits.md there indexes them.
+a folded "Call trees" section lists the callers of every added or modified Python function and class,
+searched under --path and the --scripts folders (put -s after the comparison points); -n omits it.
 """
 from __future__ import annotations
 
@@ -40,10 +42,14 @@ def parse_args(argv=None) -> argparse.Namespace:
     ap.add_argument("--raw", action="store_true", help="keep docstrings, comments and formatting-only changes")
     ap.add_argument("-C", "--context", type=int, default=3, help="patch context lines (default: 3)")
     ap.add_argument("--open", type=int, default=40, metavar="N",
-                    help="folds with at most N lines render open, larger ones closed (default: 40; 0: all closed)")
+                    help="unit folds with at most N lines render open, larger ones closed (default: 40; "
+                         "0: all closed); file folds listing the units stay open")
     ap.add_argument("--untracked", action="store_true", help="with U: include untracked files as added")
     ap.add_argument("-o", "--out", default=None, help="output directory, or a .md file name")
     ap.add_argument("--stdout", action="store_true", help="print the markdown instead of writing files")
+    ap.add_argument("-s", "--scripts", nargs="+", default=[], metavar="PATH",
+                    help="extra folders searched for callers: .py files and ```python fences in .md files")
+    ap.add_argument("-n", "--no-call", action="store_true", help="omit the call-tree section")
     ap.add_argument("-V", "--version", action="version", version=f"giddy {__version__}")
     args = ap.parse_args(argv)
     if len(args.points) > 2:
@@ -81,7 +87,8 @@ def main(argv=None) -> int:
         tuple(e.strip() for e in args.ext.split(",") if e.strip())
     points = args.points + [None] * (2 - len(args.points))
     opts = Options(new=points[0], old=points[1], path=args.path, exts=exts, code_only=not args.raw,
-                   context=max(0, args.context), untracked=args.untracked, open_max=args.open, out=args.out)
+                   context=max(0, args.context), untracked=args.untracked, open_max=args.open, out=args.out,
+                   calls=not args.no_call, scripts=tuple(args.scripts))
     try:
         result = compare(opts)
         if args.stdout:

@@ -122,6 +122,39 @@ class Repo:
         proc = _run(["git", "cat-file", "blob", spec], self.root)
         return proc.stdout if proc.returncode == 0 else None
 
+    def blobs(self, specs: list[str]) -> list[bytes | None]:
+        """Raw blobs for many `<tree-ish>:<path>` / `:<path>` specs in one `git cat-file --batch`."""
+        if not specs:
+            return []
+        if any("\n" in s for s in specs):
+            return [self.blob(s) for s in specs]
+        out = self.git("cat-file", "--batch", stdin=("\n".join(specs) + "\n").encode())
+        result: list[bytes | None] = []
+        pos = 0
+        for _ in specs:
+            eol = out.index(b"\n", pos)
+            header = out[pos:eol].split()
+            pos = eol + 1
+            if len(header) == 3 and header[1] == b"blob":
+                size = int(header[2])
+                result.append(out[pos:pos + size])
+                pos += size + 1
+            else:
+                result.append(None)
+                if len(header) == 3:                    # tree / commit object: skip its body
+                    pos += int(header[2]) + 1
+        return result
+
+    def files(self, kind: str, sha: str | None = None) -> list[str]:
+        """Every file of a snapshot: commit tree, index, or working tree (tracked + untracked, not ignored)."""
+        if kind == "commit":
+            out = self.git("ls-tree", "-r", "-z", "--name-only", sha or "HEAD")
+        elif kind == "index":
+            out = self.git("ls-files", "-z")
+        else:
+            out = self.git("ls-files", "-z", "--cached", "--others", "--exclude-standard")
+        return [os.fsdecode(p) for p in out.split(b"\x00") if p]
+
     def untracked(self, pathspec: str) -> list[str]:
         out = self.git("ls-files", "-z", "--others", "--exclude-standard", "--", pathspec)
         return [os.fsdecode(p) for p in out.split(b"\x00") if p]

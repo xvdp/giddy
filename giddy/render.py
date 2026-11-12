@@ -6,7 +6,8 @@ Layout
     file table: anchor link per file, status, unit count, +/- line counts
     per file: anchor, link to the file in the work tree, then
         added file      one closed <details> holding the complete file (language fence)
-        other files     one <details> per changed unit
+        other files     one <details> per changed unit; with 2+ units all wrapped in one open <details>
+                        whose summary lists the units by tag: <i>ADD</i> f(), <b>A[</b>.m() .n()<b>]</b> · <i>MOD</i> ...
             modified unit   diff fence; a function appears whole, context rows prefixed by one space
             added/removed   complete unit code (language fence)
             body <= open_max lines: <details open>, summary = unit name, status, line range, +/- counts
@@ -98,6 +99,54 @@ def _unit_block(change: UnitChange, fc: FileChange, open_max: int) -> str:
     return _details(summary, body, is_open)
 
 
+TAGS = (("added", "ADD"), ("modified", "MOD"), ("removed", "REMOVE"))
+
+
+def _split(label: str) -> tuple[str | None, str]:
+    """("MyClass", "method()") for a method label, (None, label) otherwise."""
+    if label.startswith(("class ", "impl ", "struct ", "module ", "interface ", "namespace ")):
+        return None, label
+    base = label[:-2] if label.endswith("()") else label
+    sep = "::" if "::" in base else "."
+    owner, _, name = base.rpartition(sep)
+    return (owner, sep + name + "()") if owner else (None, label)
+
+
+def _tag_list(changes: list[UnitChange]) -> str:
+    """`<b>f()</b>, <b>A.m()</b>, <b>B[</b>.m() .n()<b>]</b>`: methods grouped by owner, first-seen order."""
+    groups: dict[str | None, list[str]] = {}
+    order: list[tuple[str | None, str]] = []
+    for c in changes:
+        owner, name = _split(c.unit.label)
+        if owner is None:
+            order.append((None, name))
+        else:
+            if owner not in groups:
+                order.append((owner, ""))
+            groups.setdefault(owner, []).append(name)
+    items = []
+    for owner, name in order:
+        if owner is None:
+            items.append(f"<b>{html.escape(name)}</b>")
+        elif len(groups[owner]) == 1:
+            items.append(f"<b>{html.escape(owner + groups[owner][0])}</b>")
+        else:
+            items.append(f"<b>{html.escape(owner)}[</b>{html.escape(' '.join(groups[owner]))}<b>]</b>")
+    return ", ".join(items)
+
+
+def _file_tags(fc: FileChange) -> str:
+    """Summary of a file fold: `<i>ADD</i> ... · <i>MOD</i> ... · <i>REMOVE</i> ...`.
+    Module-level units are listed only when a status has nothing else."""
+    parts = []
+    for status, tag in TAGS:
+        changes = [u for u in fc.units if u.status == status]
+        named = [u for u in changes if u.unit.kind != "module"] or changes
+        if named:
+            parts.append(f"<i>{tag}</i> {_tag_list(named)}")
+    return " · ".join(parts)
+
+
 def _file_block(fc: FileChange) -> str:
     code = _code(fc.code or [])
     n = code.count("\n") + 1 if code else 0
@@ -106,7 +155,7 @@ def _file_block(fc: FileChange) -> str:
 
 
 def render(meta: dict, files: list[FileChange], skipped: list[str], root: Path, outdir: Path,
-           open_max: int = OPEN_MAX) -> str:
+           open_max: int = OPEN_MAX, calls: str = "") -> str:
     new, old = meta["new"], meta["old"]
     out = [f"<!-- giddy {json.dumps(meta, separators=(',', ':'))} -->",
            f"# {meta['branch']} · {new['label']} ← {old['label']}", f"[commits index]({INDEX_NAME})",
@@ -124,6 +173,8 @@ def render(meta: dict, files: list[FileChange], skipped: list[str], root: Path, 
         out.append(f"| {i} | [{_cell(fc.path)}](#f{i}) | {fc.status}{note} | {len(fc.units)} | {fc.added} | {fc.removed} |")
     if skipped:
         out += ["", "No code change: " + ", ".join(f"`{p}`" for p in skipped)]
+    if calls:
+        out += ["", "[Call trees](#calls)"]
     out.append("")
 
     for i, fc in enumerate(files, 1):
@@ -141,5 +192,11 @@ def render(meta: dict, files: list[FileChange], skipped: list[str], root: Path, 
         if fc.code is not None:
             out.append(_file_block(fc))
         else:
-            out += [_unit_block(u, fc, open_max) for u in fc.units]
+            blocks = [_unit_block(u, fc, open_max) for u in fc.units]
+            if len(blocks) > 1:
+                out.append(_details(_file_tags(fc), "\n".join(blocks).rstrip(), True))
+            else:
+                out += blocks
+    if calls:
+        out += ["", calls]
     return "\n".join(out).rstrip() + "\n"

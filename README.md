@@ -52,6 +52,12 @@ giddy -o `<path>.md`
 giddy -C 5          # show 5 context lines on non-Python files (default: 3)
         # -C | --context
 giddy --open 10     # fold output on functions > 10 lines (default: 40)
+
+# Call trees (Python)
+giddy 0214 -s scripts docs   # also search scripts/ and ```python fences in docs/*.md for callers
+        # -s | --scripts      extra caller folders; put after the comparison points
+giddy -n                     # no call-tree section
+        # -n | --no-call
 ```
 **Outputs**
 
@@ -65,7 +71,29 @@ Writes commit table: `<output dir>`/`commits.md`, listed by a `(commit_index)%04
 
 If no code change found, nothing is written and the nearest code change with same path and ext is listed.
 
+A file with 2+ changed units is wrapped in an open fold whose summary lists them by tag, methods grouped by class: `ADD _posed(), RenderStack[.set_out_type() ._as_mask()] · MOD ToneMapStep.run()`.
+
 </samp>
+
+### Call trees
+
+A folded **Call trees** section at the end of each report holds, per added or modified Python function or class, its incoming call hierarchy: callers, their callers, up to scripts and `.md` code fences.
+
+```
+gett.stack.RenderStack._as_image()  MOD          <- root, links to its definition
+├── gett.stack.RenderStack.output()  MOD         <- bold: changed in this diff, gets no tree of its own
+│   ├── analysis.parameter_sweep._rung_image() ~ <- each name links to its call site
+│   │   └── analysis.parameter_sweep.sweep_stack()
+│   └── gett.render.render_fitted() ~
+│       └── mote_paths.stack()                   <- from -s scripts
+└── gett.stack.RenderStack.reproject()  MOD
+```
+
+- Scope: `.py` files under `-p` and `-s`, plus ```` ```python ```` fences in `.md` files under `-s`, read from the new snapshot (commit, staged or working tree).
+- Names: module path without its top package, `gutai.gett.stack` → `gett.stack`.
+- Order: lowest call level first. A changed definition reached by an earlier tree is bold there and gets no tree.
+- Resolution is static (`ast`): imports, relative imports, package re-exports, `self.`/`cls.`/`super()`, `Class.m`, `module.f`, and `Class()` as a call to `__init__` resolve exactly. A call on an untyped receiver, `x.m()`, is matched by method name only when exactly one method of that name exists in scope, marked `~`. Functions passed as values (callbacks) are not traced.
+- Marks: `↑` expanded above · `↻` recursion · `…` depth limit (8).
 
 
 | commit | date | subject | reports |
@@ -119,6 +147,15 @@ from giddy import Options, compare, write
 result = compare(Options(new="S", path="src", exts=("py",)))
 print(result.markdown)
 write(result)            # report + commits.md
+
+from giddy import call_stack
+
+rep = call_stack(["gutai.gett.stack.RenderStack.reference",       # dotted name
+                  "gutai/src/gutai/gett/render.py:render_mitsuba",  # file:qualname
+                  some_function],                                    # function or class object
+                 out="calls", paths=("gutai/src",), scripts=("gutai/scripts",), snapshot="U")
+rep.path       # calls/calls_gett.stack.RenderStack.reference+2.md
+rep.markdown   # per function: location `path:line`, signature, call tree
 ```
 
 ## Tests

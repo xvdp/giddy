@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import __version__
+from .callgraph import report_section
 from .diffing import FileChange, changed_paths, compare_file, is_reported, matches_ext
 from .git import GiddyError, Repo
 from .index import report_name, write_index
@@ -28,6 +29,8 @@ class Options:
     untracked: bool = False
     open_max: int = 40                  # folds with at most this many body lines render open
     out: str | None = None              # output directory or .md file; None => $GIDDY_DIR or <root>/.giddy
+    calls: bool = True                  # append incoming-call trees of changed Python definitions
+    scripts: tuple[str, ...] = ()       # extra caller folders: .py files, ```python fences in .md files
 
 
 @dataclass
@@ -83,7 +86,11 @@ def compare(opts: Options) -> Result:
             "old": describe(repo, old), "path": pathspec, "exts": list(exts) if exts else None,
             "code_only": opts.code_only}
     outdir, explicit = output_target(repo, opts.out)
-    md = render(meta, files, skipped, repo.root, outdir, opts.open_max)
+    calls = ""
+    if opts.calls and files:
+        scope = (str(repo.root / pathspec),)
+        calls = report_section(repo, meta["new"], files, scope, tuple(opts.scripts), outdir)
+    md = render(meta, files, skipped, repo.root, outdir, opts.open_max, calls)
     return Result(md, meta, files, skipped, repo, outdir / (explicit or report_name(meta)))
 
 

@@ -203,15 +203,16 @@ def test_rename_delete_and_syntax_error(repo):
 
 # -- output -----------------------------------------------------------------------------------------
 def test_report_name_markdown_and_index(repo):
-    res = write(compare(Options(exts=("py",))))
+    res = write(compare(Options(exts=("py",), calls=False)))
     assert res.report == repo.root / ".giddy" / "main_0003_0002_py.md"
     md = res.report.read_text()
     assert read_meta(res.report)["new"]["index"] == 3
-    assert md.count("<details open>") == 2 and md.count("<details>") == 1    # 2 units + new file
+    assert md.count("<details open>") == 3 and md.count("<details>") == 1    # file fold + 2 units, new file
+    assert "<summary><i>MOD</i> <b>module</b>, <b>B.run()</b></summary>" in md or "<i>MOD</i> <b>B.run()</b>" in md
     assert "```diff\n@@ -25,4 +25,4 @@ B.run()\n     def run(self, a):" in md
     assert "```python\ndef d():\n    return 0\n```" in md
-    closed = compare(Options(exts=("py",), open_max=0)).markdown
-    assert "<details open>" not in closed and "<pre>-        return inner(a) + 1" not in closed
+    closed = compare(Options(exts=("py",), open_max=0, calls=False)).markdown
+    assert closed.count("<details open>") == 1 and "<pre>-        return inner(a) + 1" not in closed
     assert "<pre>-            return z * 2\n+            return z * 3</pre>" in closed
     assert "](../pkg/mod.py#L" in md and '](#f1)' in md
 
@@ -262,14 +263,14 @@ def test_nearest_code_changes_when_empty(repo, capsys):
 
     assert main(["2", "-e", "rs"]) == 0                     # lib.rs first appears in 0003
     out = capsys.readouterr().out.splitlines()
-    assert out[1:] == ["giddy: previous code change: none", out[2]] and " 0003 " in out[2]
+    assert out[1:3] == ["giddy: previous code change: none", out[2]] and " 0003 " in out[2]
 
     repo.write("pkg/sub/deep.py", 'def d():\n    """doc"""\n    return 0\n')
     repo.commit("c4: docstring")                            # 0004: no code change at HEAD
     assert main([]) == 0
     out = capsys.readouterr().out.splitlines()
     assert out[0] == "giddy: no code changes 0004 <- 0003 under '.'"
-    assert out[1].startswith("giddy: last code change under '.': 0003 ") and len(out) == 2
+    assert out[1].startswith("giddy: last code change under '.': 0003 ") and out[2].startswith("git log")
 
     repo.write("pkg/sub/deep.py", 'def d():\n    """doc 2"""\n    return 0\n')
     repo("add", "-A")
