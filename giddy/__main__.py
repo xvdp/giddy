@@ -19,8 +19,9 @@ examples:
   giddy a1b2c3d -e py,rs    commit a1b2c3d vs its parent, .py and .rs files
 
 reports go to <repo root>/.giddy/ (or $GIDDY_DIR, or --out); commits.md there indexes them.
-a folded "Call trees" section lists the callers of every added or modified Python function and class,
-searched under --path and the --scripts folders (put -s after the comparison points); -n omits it.
+a "Call graph" section links a gaffy view (VS Code extension, https://github.com/xvdp/gaffy) of every added or
+modified Python function and class, one caller level and one callee level each; giddy opens it in VS Code, where
+gaffy builds and saves it. Without gaffy the section says where to get it; -n omits the section.
 """
 from __future__ import annotations
 
@@ -49,7 +50,7 @@ def parse_args(argv=None) -> argparse.Namespace:
     ap.add_argument("--stdout", action="store_true", help="print the markdown instead of writing files")
     ap.add_argument("-s", "--scripts", nargs="+", default=[], metavar="PATH",
                     help="extra folders searched for callers: .py files and ```python fences in .md files")
-    ap.add_argument("-n", "--no-call", action="store_true", help="omit the call-tree section")
+    ap.add_argument("-n", "--no-call", action="store_true", help="omit the call graph section (gaffy view)")
     ap.add_argument("-V", "--version", action="version", version=f"giddy {__version__}")
     args = ap.parse_args(argv)
     if len(args.points) > 2:

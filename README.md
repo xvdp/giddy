@@ -45,11 +45,11 @@ giddy -C 5          # show 5 context lines on non-Python files (default: 3)
         # -C | --context
 giddy --open 10     # fold output on functions > 10 lines (default: 40)
 
-# Call trees (only implemented for python)
-giddy 0214 -s scripts docs   # trace calls from dirs external to module
-        # -s | --scripts        nargs+
-giddy -n                     # omit call-tree section
+# Call graph (gaffy view, Python definitions)
+giddy -n                     # omit the call graph section
         # -n | --no-call
+giddy 0214 -s scripts docs   # caller folders for giddy's own call trees (callgraph.py; not in the report now)
+        # -s | --scripts        nargs+
 ```
 
 
@@ -69,7 +69,7 @@ hash, partial hash, branch, tag, HEAD~<int> # processed with git rev-parse
 Default output_dir: `<git project root>/.giddy/`. Can be overridden `-o <path>/<name>`
 
 <samp>
-Writes 2 documents per call. (1. commit table update, 2. filtered git diff with  call trees.)
+Writes 2 documents per call (1. commit table update, 2. filtered git diff with a call graph link), plus the gaffy view.
 
 
 ### 1. commit table
@@ -106,9 +106,11 @@ def func():
 </details>
 
 
-### 2.1 call trees
+### 2.1 call graph
 
-Foldable all trees for each function changed by the commit.
+The report's "Call graph" section links a gaffy view, `<repo>/.gaffy/views/giddy_<report>.gaffy`, seeded with every added or modified Python function and class: one caller level and one callee level each, from the language server of the working tree. giddy opens the view in VS Code (`code -r`; command line from `$GIDDY_CODE`, default `code`); gaffy resolves the seeds, builds the graph and saves it (`"save": true`). A commit comparison keeps an existing view; a working-tree or staged comparison rewrites it. Without gaffy (`code --list-extensions` lacks `xvdp.gaffy`), the section says to search the VS Code Marketplace for gaffy and links https://github.com/xvdp/gaffy.
+
+giddy's own call trees (`giddy/callgraph.py`, `call_stack()` below) stay available; `compare()` no longer appends them. Their earlier report form:
 
 <details open>
 <summary><b>foo.plenoptic_goo.scoobie()</b> <i>ADD</i></summary>

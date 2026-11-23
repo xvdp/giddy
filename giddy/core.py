@@ -6,7 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import __version__
-from .callgraph import report_section
+from . import gaffyview
+from .callgraph import report_section  # noqa: F401  giddy's own call trees, replaced by gaffyview in compare()
 from .diffing import FileChange, changed_paths, compare_file, is_reported, matches_ext
 from .git import GiddyError, Repo
 from .index import report_name, write_index
@@ -29,7 +30,7 @@ class Options:
     untracked: bool = False
     open_max: int = 40                  # folds with at most this many body lines render open
     out: str | None = None              # output directory or .md file; None => $GIDDY_DIR or <root>/.giddy
-    calls: bool = True                  # append incoming-call trees of changed Python definitions
+    calls: bool = True                  # append the call graph section: a gaffy view of the changed Python definitions
     scripts: tuple[str, ...] = ()       # extra caller folders: .py files, ```python fences in .md files
 
 
@@ -42,6 +43,7 @@ class Result:
     repo: Repo | None = None
     report: Path | None = None
     index: Path | None = None
+    gaffy: gaffyview.GaffyView | None = None   # call graph view, written and opened with the report
 
 
 def _pathspec(repo: Repo, path: str) -> str:
@@ -86,12 +88,17 @@ def compare(opts: Options) -> Result:
             "old": describe(repo, old), "path": pathspec, "exts": list(exts) if exts else None,
             "code_only": opts.code_only}
     outdir, explicit = output_target(repo, opts.out)
+    report = outdir / (explicit or report_name(meta))
     calls = ""
+    gaffy = None
     if opts.calls and files:
-        scope = (str(repo.root / pathspec),)
-        calls = report_section(repo, meta["new"], files, scope, tuple(opts.scripts), outdir)
+        # giddy's own call trees, replaced by a gaffy view (one level up and one down per changed definition):
+        # scope = (str(repo.root / pathspec),)
+        # calls = report_section(repo, meta["new"], files, scope, tuple(opts.scripts), outdir)
+        gaffy = gaffyview.view(repo.root, report, meta, files)
+        calls = gaffyview.section(gaffy, outdir) if gaffy else ""
     md = render(meta, files, skipped, repo.root, outdir, opts.open_max, calls)
-    return Result(md, meta, files, skipped, repo, outdir / (explicit or report_name(meta)))
+    return Result(md, meta, files, skipped, repo, report, gaffy=gaffy)
 
 
 def nearest_changes(result: Result) -> dict[str, tuple[Snapshot | None, bool]]:
@@ -119,4 +126,6 @@ def write(result: Result, index: bool = True) -> Result:
     result.report.write_text(result.markdown, encoding="utf-8")
     if index:
         result.index = write_index(result.repo, result.report.parent)
+    if result.gaffy:
+        gaffyview.save(result.gaffy)
     return result

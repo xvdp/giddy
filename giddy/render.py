@@ -174,7 +174,7 @@ def render(meta: dict, files: list[FileChange], skipped: list[str], root: Path, 
     if skipped:
         out += ["", "No code change: " + ", ".join(f"`{p}`" for p in skipped)]
     if calls:
-        out += ["", "[Call trees](#calls)"]
+        out += ["", "[Call graph](#calls)"]
     out.append("")
 
     for i, fc in enumerate(files, 1):

@@ -4,8 +4,8 @@ from __future__ import annotations
 import pytest
 
 from giddy import call_stack
-from giddy.callgraph import Scope
-from giddy.core import Options, compare
+from giddy.callgraph import Scope, report_section
+from giddy.core import Options, compare, write
 from giddy.git import Repo
 
 from test_giddy import Git
@@ -67,6 +67,13 @@ def callers(graph, did):
     return sorted(graph.incoming(did))
 
 
+def trees_md(pkg):
+    """giddy's own call-tree section (callgraph.report_section), which compare() no longer appends."""
+    res = compare(Options(path="src", calls=False))
+    return report_section(res.repo, res.meta["new"], res.files, (str(res.repo.root / "src"),),
+                          ("scripts", "docs"), res.report.parent)
+
+
 def test_resolution(pkg):
     g = Scope(Repo("."), "worktree", None, ("src",), ("scripts", "docs")).build()
     assert callers(g, "pkg.util.helper") == ["pkg.core.Base.setup", "pkg.core.Engine.step"]
@@ -82,15 +89,14 @@ def test_report_section_levels_and_bold(pkg):
     pkg.write("src/pkg/util.py", "def helper(x):\n    return x + 1\n")
     pkg.write("src/pkg/app.py", FILES["src/pkg/app.py"].replace("return pc", "x = 1\n    return pc"))
     pkg.commit("c1")
-    md = compare(Options(path="src", scripts=("scripts", "docs"))).markdown
+    md = trees_md(pkg)
     section = md[md.index("## Call trees"):]
     assert section.count("<details open>") == 1 and section.count("<details>") == 1   # open section, one closed tree
     tree = section[section.index("<pre>"):section.index("</pre>")]
     assert tree.startswith('<pre>\n<b><a href="../src/pkg/util.py#L1" target="_blank" rel="noopener">util.helper()</a></b> <i>MOD</i>')
     assert '<b><a href="../src/pkg/app.py#L10" target="_blank" rel="noopener">app.run()</a></b> <i>MOD</i> ~' in tree   # call site; bold, no own tree
     assert "go (module)" in tree and "docs/guide.md fence L4" in tree
-    assert "[Call trees](#calls)" in md
-    assert "## Call trees" not in compare(Options(path="src", calls=False)).markdown
+    assert "## Call graph" not in compare(Options(path="src", calls=False)).markdown
 
 
 def test_api(pkg, tmp_path):
@@ -105,7 +111,7 @@ def test_api(pkg, tmp_path):
 def test_external_callers_and_order(pkg):
     pkg.write("src/pkg/util.py", "def helper(x):\n    return x + 1\n")
     pkg.commit("c1")
-    md = compare(Options(path="src", scripts=("scripts", "docs"))).markdown
+    md = trees_md(pkg)
     tree = md[md.index("<pre>"):md.index("</pre>")].splitlines()
     run = next(i for i, l in enumerate(tree) if ">app.run()<" in l)
     assert tree[run + 1].endswith('── ... <a href="../docs/guide.md#L5" target="_blank" rel="noopener">'
@@ -128,3 +134,39 @@ def test_recursion_first_and_external_indent():
     rows = [re.sub(r"<[^>]+>", "", l) for l in text.splitlines()[2:-1]]
     assert rows == ["├── m.zrec()", "│   └── m.f()  ↻", "├── m.alpha()", "└── ... ext/s.top()",
                     "        └── ext/s.outer()"]
+
+
+def test_gaffy_view_section(pkg):
+    pkg.write("src/pkg/util.py", "def helper(x):\n    return x + 1\n")
+    pkg.commit("c1")
+    res = compare(Options(path="src"))
+    assert res.gaffy is not None and res.gaffy.seeds == ["src/pkg/util.py#helper"]
+    assert res.gaffy.installed is None                       # no VS Code command line in tests
+    md = res.markdown
+    assert "[Call graph](#calls)" in md and "## Call graph" in md
+    assert f"]({'../.gaffy/views/giddy_' + res.report.stem}.gaffy)" in md
+    assert "https://github.com/xvdp/gaffy" in md and "VS Code Marketplace" in md
+    write(res)
+    import json
+    doc = json.loads(res.gaffy.path.read_text())
+    assert doc["view"] == {"seeds": ["src/pkg/util.py#helper"], "arrange": "auto", "direction": "both",
+                           "depthUp": 1, "depthDown": 1, "save": True}
+
+
+def test_gaffy_installed_and_opened(pkg, tmp_path, monkeypatch):
+    log = tmp_path / "code.log"
+    fake = tmp_path / "code"
+    fake.write_text(f"#!/bin/sh\necho \"$@\" >> {log}\necho xvdp.gaffy\n")
+    fake.chmod(0o755)
+    monkeypatch.setenv("GIDDY_CODE", str(fake))
+    pkg.write("src/pkg/util.py", "def helper(x):\n    return x + 2\n")
+    pkg.commit("c2")
+    res = compare(Options(path="src"))
+    assert res.gaffy.installed is True and "not installed" not in res.markdown
+    write(res)
+    import time
+    for _ in range(50):
+        if log.exists() and "-r" in log.read_text():
+            break
+        time.sleep(0.05)
+    assert f"-r {res.gaffy.path}" in log.read_text()
