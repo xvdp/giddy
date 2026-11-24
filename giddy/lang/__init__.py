@@ -4,6 +4,7 @@ from __future__ import annotations
 from .base import Adapter, Line, Unit, split_lines
 from .clike import SPECS, CLikeAdapter
 from .julia import JuliaAdapter
+from .markdown import MarkdownAdapter
 from .python import PythonAdapter
 from .text import TextAdapter
 
@@ -26,14 +27,27 @@ for _lang, _exts in _EXTS.items():
         else CLikeAdapter(SPECS[_lang])
     ADAPTERS.update({e: _adapter for e in _exts})
 
-FENCES = {"wgsl": "wgsl", "sh": "bash", "toml": "toml", "json": "json", "yaml": "yaml", "yml": "yaml",
-          "md": "markdown"}
+MARKDOWN = ("md", "markdown")
+FENCES = {"wgsl": "wgsl", "sh": "bash", "toml": "toml", "json": "json", "yaml": "yaml", "yml": "yaml"}
+_MARKDOWN = MarkdownAdapter(ADAPTERS)
+
+
+def _ext(path: str) -> str:
+    return path.rsplit(".", 1)[-1].lower() if "." in path.rsplit("/", 1)[-1] else ""
+
+
+def parsed(path: str) -> bool:
+    """A file giddy parses: a registered language, or markdown (its code fences)."""
+    ext = _ext(path)
+    return ext in ADAPTERS or ext in MARKDOWN
 
 
 def adapter_for(path: str) -> Adapter:
-    ext = path.rsplit(".", 1)[-1].lower() if "." in path.rsplit("/", 1)[-1] else ""
+    ext = _ext(path)
+    if ext in MARKDOWN:
+        return _MARKDOWN
     return ADAPTERS.get(ext) or TextAdapter(FENCES.get(ext, ext))
 
 
-__all__ = ["Adapter", "Line", "Unit", "split_lines", "adapter_for", "TextAdapter", "PythonAdapter",
-           "CLikeAdapter", "JuliaAdapter", "ADAPTERS"]
+__all__ = ["Adapter", "Line", "Unit", "split_lines", "adapter_for", "parsed", "TextAdapter", "PythonAdapter",
+           "CLikeAdapter", "JuliaAdapter", "MarkdownAdapter", "ADAPTERS"]

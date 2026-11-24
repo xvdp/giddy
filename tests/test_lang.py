@@ -197,3 +197,58 @@ def test_code_only_lines_drop_comments_and_docstrings():
 def test_unbalanced_source_falls_back():
     assert adapter_for("a.rs").units("fn f() {", True) is None
     assert adapter_for("a.jl").units("function f()\n", True) is None
+
+
+# -- markdown: code fences only -----------------------------------------------------------------------
+MD = '''\
+# notes
+
+Prose about foo.
+
+```python
+def foo(x):
+    """doc"""
+    return x + 1
+```
+
+```bash
+make all
+```
+
+  ```ts
+  function goo(a: number) { return a; }
+  ```
+
+```python
+X = foo(2)
+```
+
+```python
+def moo(a, ...):
+    pass
+```
+'''
+
+
+def test_markdown_fence_units():
+    units = adapter_for("README.md").units(MD, True)
+    assert [u.key for u in units] == ["python:foo", "ts:goo", "python:<module>", "python:fence#1"]
+    by = {u.key: u for u in units}
+    assert by["python:foo"].start == 6 and by["python:foo"].fence == "python"
+    assert by["python:<module>"].label == "python fences" and by["python:<module>"].start == 20
+    assert by["ts:goo"].lines[0].text == "function goo(a: number) { return a; }"    # fence indentation removed
+    assert by["python:fence#1"].label == "python fence L24"                     # `...`: does not parse
+
+
+def test_markdown_prose_docstrings_and_comments_ignored():
+    edited = (MD.replace("Prose about foo.", "Other prose.\n\nMore.").replace('"""doc"""', '"""new doc"""')
+              .replace("return x + 1", "return x + 1  # one more"))
+    assert same("README.md", MD, edited)
+    assert not same("README.md", MD, MD.replace("return x + 1", "return x + 2"))
+
+
+def test_markdown_added_fence_keeps_pairing():
+    edited = MD.replace("# notes\n", "# notes\n\n```python\ndef shoo():\n    return 0\n```\n")
+    ua = {u.key: u.signature for u in adapter_for("a.md").units(MD, True)}
+    ub = {u.key: u.signature for u in adapter_for("a.md").units(edited, True)}
+    assert set(ub) - set(ua) == {"python:shoo"} and all(ub[k] == v for k, v in ua.items())

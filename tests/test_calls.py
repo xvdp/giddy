@@ -93,8 +93,8 @@ def test_report_section_levels_and_bold(pkg):
     section = md[md.index("## Call trees"):]
     assert section.count("<details open>") == 1 and section.count("<details>") == 1   # open section, one closed tree
     tree = section[section.index("<pre>"):section.index("</pre>")]
-    assert tree.startswith('<pre>\n<b><a href="../src/pkg/util.py#L1" target="_blank" rel="noopener">util.helper()</a></b> <i>MOD</i>')
-    assert '<b><a href="../src/pkg/app.py#L10" target="_blank" rel="noopener">app.run()</a></b> <i>MOD</i> ~' in tree   # call site; bold, no own tree
+    assert tree.startswith('<pre>\n<b><a href="../../src/pkg/util.py#L1" target="_blank" rel="noopener">util.helper()</a></b> <i>MOD</i>')
+    assert '<b><a href="../../src/pkg/app.py#L10" target="_blank" rel="noopener">app.run()</a></b> <i>MOD</i> ~' in tree   # call site; bold, no own tree
     assert "go (module)" in tree and "docs/guide.md fence L4" in tree
     assert "## Call graph" not in compare(Options(path="src", calls=False)).markdown
 
@@ -114,9 +114,9 @@ def test_external_callers_and_order(pkg):
     md = trees_md(pkg)
     tree = md[md.index("<pre>"):md.index("</pre>")].splitlines()
     run = next(i for i, l in enumerate(tree) if ">app.run()<" in l)
-    assert tree[run + 1].endswith('── ... <a href="../docs/guide.md#L5" target="_blank" rel="noopener">'
+    assert tree[run + 1].endswith('── ... <a href="../../docs/guide.md#L5" target="_blank" rel="noopener">'
                                   '<i>docs/guide.md fence L4</i></a>')
-    assert tree[run + 2].endswith('── ... <a href="../scripts/go.py#L4" target="_blank" rel="noopener">'
+    assert tree[run + 2].endswith('── ... <a href="../../scripts/go.py#L4" target="_blank" rel="noopener">'
                                   '<i>scripts/go (module)</i></a>')
     assert ">core.Engine.setup()<" in tree[run + 3]          # internal sibling of app.run, after its subtree
 
@@ -144,13 +144,16 @@ def test_gaffy_view_section(pkg):
     assert res.gaffy.installed is None                       # no VS Code command line in tests
     md = res.markdown
     assert "[Call graph](#calls)" in md and "## Call graph" in md
-    assert f"]({'../.gaffy/views/giddy_' + res.report.stem}.gaffy)" in md
+    assert res.report.parent == pkg.root / ".baggy" / "giddy"
+    assert res.gaffy.path == pkg.root / ".baggy" / "gaffy" / f"giddy_{res.report.stem}.gaffy"
+    assert f"]({'../gaffy/giddy_' + res.report.stem}.gaffy)" in md
+    assert md.rstrip().endswith("Seeds: `src/pkg/util.py#helper`")       # last section
     assert "https://github.com/xvdp/gaffy" in md and "VS Code Marketplace" in md
     write(res)
     import json
     doc = json.loads(res.gaffy.path.read_text())
-    assert doc["view"] == {"seeds": ["src/pkg/util.py#helper"], "arrange": "auto", "direction": "both",
-                           "depthUp": 1, "depthDown": 1, "save": True}
+    assert doc["view"] == {"seeds": ["src/pkg/util.py#helper"], "arrange": "grow", "direction": "both",
+                           "depth": 1000, "save": True}
 
 
 def test_gaffy_installed_and_opened(pkg, tmp_path, monkeypatch):
@@ -170,3 +173,47 @@ def test_gaffy_installed_and_opened(pkg, tmp_path, monkeypatch):
             break
         time.sleep(0.05)
     assert f"-r {res.gaffy.path}" in log.read_text()
+
+
+def test_gaffy_view_between(pkg):
+    pkg.write("src/pkg/util.py", "def helper(x):\n    return x + 3\n")
+    pkg.write("src/pkg/app.py", FILES["src/pkg/app.py"].replace("return pc", "y = 2\n    return pc"))
+    pkg.commit("c3")
+    import json
+    res = compare(Options(path="src"))
+    assert len(res.gaffy.seeds) == 2
+    view = json.loads(res.gaffy.text)["view"]
+    assert view["between"] is True and view["arrange"] == "grow" and view["depth"] == 1000
+    assert "call paths between the 2 changed definitions, any number of calls" in res.markdown
+    wide = json.loads(compare(Options(path="src", graph_depth=3, between=False)).gaffy.text)["view"]
+    assert "between" not in wide and wide["depth"] == 3
+
+
+def test_gaffy_seeds_every_parsed_language(pkg):
+    from giddy.gaffyview import qualified
+    assert qualified("SimpleKNN::knn") == "SimpleKNN.knn"
+    assert qualified("coord2Morton(float3 coord, float3 minn)") == "coord2Morton"
+    assert qualified("helper#2") == "helper" and qualified("CustomMin::operator()") is None
+    pkg.write("src/web/app.ts", "export class Shoo {\n    run(a: number) { return a; }\n}\ninterface Goo { a: number }\n")
+    pkg.write("src/knn.cu", "namespace SimpleKNN {}\nvoid SimpleKNN::knn(int P) {\n    int a = P;\n}\n")
+    pkg.write("src/notes.md", "```python\ndef magoo():\n    return 1\n```\n")
+    pkg.commit("c4")
+    res = compare(Options(path="src"))
+    assert set(res.gaffy.seeds) == {"src/web/app.ts#Shoo", "src/web/app.ts#Shoo.run", "src/knn.cu#SimpleKNN.knn"}
+
+
+def test_no_view_section_and_console(pkg, capsys, monkeypatch):
+    from giddy.__main__ import main
+    pkg.write("src/pkg/data.json", "{}\n")
+    pkg.write("src/pkg/util.py", "X = 1\n")
+    pkg.commit("c5")
+    monkeypatch.chdir(pkg.root)
+    res = compare(Options(path="src"))
+    assert res.gaffy is None and res.markdown.rstrip().endswith("functions or classes in parsed source files.")
+    assert main(["-p", "src"]) == 0
+    assert "giddy: gaffy view: none" in capsys.readouterr().out
+    pkg.write("src/pkg/util.py", "def helper(x):\n    return x + 5\n")
+    pkg.commit("c6")
+    assert main(["-p", "src"]) == 0
+    out = capsys.readouterr().out
+    assert "giddy: gaffy view (1 seeds) -> " in out and ".baggy/gaffy/giddy_" in out and "not opened" in out

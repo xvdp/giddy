@@ -3,5 +3,6 @@ build/
 __pycache__/
 version.py
 .vscode/
+.baggy/
 .gaffy/
 .giddy/

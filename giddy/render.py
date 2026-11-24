@@ -92,7 +92,7 @@ def _unit_block(change: UnitChange, fc: FileChange, open_max: int) -> str:
     else:
         code = _code(change.full_code())
         lines = code.split("\n")
-        body = _fence(code, fc.fence)
+        body = _fence(code, change.unit.fence or fc.fence)
         preview = False
     is_open = len(lines) <= open_max
     summary = _head(change) + (_preview(change) if preview and not is_open else "")
@@ -165,7 +165,7 @@ def render(meta: dict, files: list[FileChange], skipped: list[str], root: Path, 
         commit = f"`{s['short']}`" if s.get("short") else ""
         out.append(f"| {side} | {name} | {commit} | {s.get('date', '')} | {_cell(s.get('subject', ''))} |")
     mode = "code only: docstrings, comments, blank lines and formatting excluded" if meta["code_only"] else "raw"
-    exts = ", ".join(meta["exts"]) if meta["exts"] else "all"
+    exts = ", ".join(meta["exts"]) if meta["exts"] else "all parsed, .md code fences"
     out += ["", f"path `{meta['path']}` · extensions `{exts}` · {mode}", "",
             f"## Files ({len(files)})", "", "| # | file | status | units | + | − |", "|---|---|---|---|---|---|"]
     for i, fc in enumerate(files, 1):

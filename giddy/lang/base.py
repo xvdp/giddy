@@ -30,6 +30,7 @@ class Unit:
     blocks: list[tuple[int, int]] | None = field(default=None)
     # blocks: inclusive line spans of the statements composing a class/module unit. A report shows
     # only the blocks that contain a change. None => show every line (functions) or no full code (text).
+    fence: str = ""             # code fence language of the unit when it differs from its file's (markdown)
 
     @property
     def start(self) -> int:

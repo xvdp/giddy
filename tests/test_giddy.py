@@ -176,6 +176,19 @@ def test_ext_and_path_filters(repo):
         compare(Options(path="/"))
 
 
+def test_all_is_parsed_languages_and_markdown_fences(repo):
+    repo.write("README.md", "hello\n\n```python\ndef shoo():\n    return 1\n```\n")
+    repo.write("notes.txt", "text\n")
+    repo.write("style.css", "a { color: red; }\n")
+    repo.commit("c4")
+    assert keys(compare(Options())) == {"README.md": ["python:shoo"]}
+    assert set(keys(compare(Options(exts=("txt", "css"))))) == {"notes.txt", "style.css"}
+    repo.write("README.md", "hello again\n\n```python\ndef shoo():\n    \"\"\"doc\"\"\"\n    return 1\n```\n")
+    repo.commit("c5: prose and docstring")
+    res = compare(Options())
+    assert res.files == [] and res.skipped == ["README.md"]
+
+
 def test_staged_unstaged_untracked(repo):
     repo.write("pkg/sub/deep.py", "def d():\n    return 1\n")
     repo("add", "pkg/sub/deep.py")
@@ -204,7 +217,7 @@ def test_rename_delete_and_syntax_error(repo):
 # -- output -----------------------------------------------------------------------------------------
 def test_report_name_markdown_and_index(repo):
     res = write(compare(Options(exts=("py",), calls=False)))
-    assert res.report == repo.root / ".giddy" / "main_0003_0002_py.md"
+    assert res.report == repo.root / ".baggy" / "giddy" / "main_0003_0002_py.md"
     md = res.report.read_text()
     assert read_meta(res.report)["new"]["index"] == 3
     assert md.count("<details open>") == 3 and md.count("<details>") == 1    # file fold + 2 units, new file
@@ -214,7 +227,7 @@ def test_report_name_markdown_and_index(repo):
     closed = compare(Options(exts=("py",), open_max=0, calls=False)).markdown
     assert closed.count("<details open>") == 1 and "<pre>-        return inner(a) + 1" not in closed
     assert "<pre>-            return z * 2\n+            return z * 3</pre>" in closed
-    assert "](../pkg/mod.py#L" in md and '](#f1)' in md
+    assert "](../../pkg/mod.py#L" in md and '](#f1)' in md
 
     repo.write("pkg/sub/deep.py", "def d():\n    return 5\n")
     repo("add", "-A")
@@ -222,7 +235,7 @@ def test_report_name_markdown_and_index(repo):
     staged = write(compare(Options(new="S", exts=("py",))))
     assert staged.report.name == "_main_S_0003_pkg-sub_py.md"
 
-    index = (repo.root / ".giddy" / "commits.md").read_text()
+    index = (repo.root / ".baggy" / "giddy" / "commits.md").read_text()
     row = next(l for l in index.splitlines() if l.startswith("| 0003_"))
     assert "main_0003_0002_py.md" in row and "_main_S_0003_pkg-sub_py.md" in row
     assert sum(l.startswith("| 000") for l in index.splitlines()) == 4
@@ -230,7 +243,7 @@ def test_report_name_markdown_and_index(repo):
 
 def test_cli(repo, capsys):
     assert main(["-1", "HEAD", "-e", "py,rs"]) == 0
-    assert (repo.root / ".giddy" / "main_0003_0002_py-rs.md").is_file()
+    assert (repo.root / ".baggy" / "giddy" / "main_0003_0002_py-rs.md").is_file()
     assert main(["2"]) == 0 and "no code changes" in capsys.readouterr().out
     assert main(["bogus"]) == 2
     assert main(["1", "--stdout"]) == 0 and capsys.readouterr().out.startswith("<!-- giddy ")

@@ -16,7 +16,7 @@ from .history import last_change, next_change
 from .snapshots import Snapshot, describe, resolve_pair
 
 ENV_OUT = "GIDDY_DIR"
-DEFAULT_DIR = ".giddy"
+DEFAULT_DIR = ".baggy/giddy"      # shared with gaffy: <repo>/.baggy/gaffy/
 
 
 @dataclass
@@ -24,13 +24,15 @@ class Options:
     new: str | None = None              # first comparison point; None => HEAD
     old: str | None = None              # second comparison point; None => previous of `new`
     path: str = "."                     # folder or file filter, relative to cwd or absolute
-    exts: tuple[str, ...] | None = None # None => every file
+    exts: tuple[str, ...] | None = None # None => every file giddy parses, and the code fences of .md files
     code_only: bool = True
     context: int = 3
     untracked: bool = False
     open_max: int = 40                  # folds with at most this many body lines render open
-    out: str | None = None              # output directory or .md file; None => $GIDDY_DIR or <root>/.giddy
-    calls: bool = True                  # append the call graph section: a gaffy view of the changed Python definitions
+    out: str | None = None              # output directory or .md file; None => $GIDDY_DIR or <root>/.baggy/giddy
+    calls: bool = True                  # append the call graph section: a gaffy view of the changed definitions
+    graph_depth: int = 0                # levels gaffy asks around the seeds; 0: until gaffy.maxNodes
+    between: bool = True                # gaffy view draws the calls between changed definitions (two or more)
     scripts: tuple[str, ...] = ()       # extra caller folders: .py files, ```python fences in .md files
 
 
@@ -44,6 +46,7 @@ class Result:
     report: Path | None = None
     index: Path | None = None
     gaffy: gaffyview.GaffyView | None = None   # call graph view, written and opened with the report
+    opened: bool = False                # VS Code asked to open the view (gaffy builds and saves it)
 
 
 def _pathspec(repo: Repo, path: str) -> str:
@@ -95,8 +98,8 @@ def compare(opts: Options) -> Result:
         # giddy's own call trees, replaced by a gaffy view (one level up and one down per changed definition):
         # scope = (str(repo.root / pathspec),)
         # calls = report_section(repo, meta["new"], files, scope, tuple(opts.scripts), outdir)
-        gaffy = gaffyview.view(repo.root, report, meta, files)
-        calls = gaffyview.section(gaffy, outdir) if gaffy else ""
+        gaffy = gaffyview.view(repo.root, report, meta, files, max(0, opts.graph_depth), opts.between)
+        calls = gaffyview.section(gaffy, outdir) if gaffy else gaffyview.no_view()
     md = render(meta, files, skipped, repo.root, outdir, opts.open_max, calls)
     return Result(md, meta, files, skipped, repo, report, gaffy=gaffy)
 
@@ -127,5 +130,5 @@ def write(result: Result, index: bool = True) -> Result:
     if index:
         result.index = write_index(result.repo, result.report.parent)
     if result.gaffy:
-        gaffyview.save(result.gaffy)
+        result.opened = gaffyview.save(result.gaffy)
     return result

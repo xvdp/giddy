@@ -18,10 +18,13 @@ examples:
   giddy U 0042 -p src/ops   working tree vs commit 42, files under src/ops
   giddy a1b2c3d -e py,rs    commit a1b2c3d vs its parent, .py and .rs files
 
-reports go to <repo root>/.giddy/ (or $GIDDY_DIR, or --out); commits.md there indexes them.
-a "Call graph" section links a gaffy view (VS Code extension, https://github.com/xvdp/gaffy) of every added or
-modified Python function and class, one caller level and one callee level each; giddy opens it in VS Code, where
-gaffy builds and saves it. Without gaffy the section says where to get it; -n omits the section.
+reports go to <repo root>/.baggy/giddy/ (or $GIDDY_DIR, or --out); commits.md there indexes them.
+the report ends with a "Call graph" section linking a gaffy view (VS Code extension, https://github.com/xvdp/gaffy),
+<repo root>/.baggy/gaffy/giddy_<report>.gaffy, seeded with the added and modified functions and classes of the
+parsed source files, in gaffy's Expand mode (>>): the call paths between them, any number of calls, within the
+data gaffy gathers (--graph-depth levels from the seeds; default: until gaffy.maxNodes); --no-between: the seeds,
+opened one layer at a time. giddy opens it in VS Code, where gaffy builds and saves it.
+Without gaffy the section says where to get it; -n omits the section.
 """
 from __future__ import annotations
 
@@ -39,7 +42,8 @@ def parse_args(argv=None) -> argparse.Namespace:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("points", nargs="*", metavar="POINT", help="comparison points, at most 2")
     ap.add_argument("-p", "--path", default=".", help="folder or file filter (default: current directory)")
-    ap.add_argument("-e", "--ext", default="all", help="extensions, comma separated, or 'all' (default: 'all')")
+    ap.add_argument("-e", "--ext", default="all", help="extensions, comma separated, or 'all' (default): every language giddy parses, "
+                    "and the code fences of .md files")
     ap.add_argument("--raw", action="store_true", help="keep docstrings, comments and formatting-only changes")
     ap.add_argument("-C", "--context", type=int, default=3, help="patch context lines (default: 3)")
     ap.add_argument("--open", type=int, default=40, metavar="N",
@@ -51,6 +55,10 @@ def parse_args(argv=None) -> argparse.Namespace:
     ap.add_argument("-s", "--scripts", nargs="+", default=[], metavar="PATH",
                     help="extra folders searched for callers: .py files and ```python fences in .md files")
     ap.add_argument("-n", "--no-call", action="store_true", help="omit the call graph section (gaffy view)")
+    ap.add_argument("--graph-depth", type=int, default=0, metavar="N",
+                    help="caller and callee levels gaffy asks the language server for (default 0: until gaffy.maxNodes)")
+    ap.add_argument("--no-between", action="store_true",
+                    help="gaffy view: the seeds opened one layer at a time, not the call paths between changed definitions")
     ap.add_argument("-V", "--version", action="version", version=f"giddy {__version__}")
     args = ap.parse_args(argv)
     if len(args.points) > 2:
@@ -82,6 +90,24 @@ def _nearest(result) -> list[str]:
     return lines
 
 
+def _graph(result) -> list[str]:
+    """Where the gaffy view went, and whether VS Code builds it now."""
+    if result.gaffy is None:
+        if 'id="calls"' not in result.markdown:      # -n
+            return []
+        return ["giddy: gaffy view: none (no added or modified functions or classes in parsed source files)"]
+    v = result.gaffy
+    if result.opened:
+        how = "opened in VS Code: gaffy builds and saves it"
+    elif v.installed is None:
+        how = "written, not opened: no VS Code command line `code` ($GIDDY_CODE)"
+    elif not v.installed:
+        how = "written, not opened: gaffy is not installed in VS Code"
+    else:
+        how = "written, not opened: `code -r` failed"
+    return [f"giddy: gaffy view ({len(v.seeds)} seeds) -> {v.path}", f"giddy: {how}"]
+
+
 def main(argv=None) -> int:
     args = parse_args(argv)
     exts = None if args.ext.strip().lower() in ("all", "*", "") else \
@@ -89,7 +115,8 @@ def main(argv=None) -> int:
     points = args.points + [None] * (2 - len(args.points))
     opts = Options(new=points[0], old=points[1], path=args.path, exts=exts, code_only=not args.raw,
                    context=max(0, args.context), untracked=args.untracked, open_max=args.open, out=args.out,
-                   calls=not args.no_call, scripts=tuple(args.scripts))
+                   calls=not args.no_call, scripts=tuple(args.scripts), graph_depth=args.graph_depth,
+                   between=not args.no_between)
     try:
         result = compare(opts)
         if args.stdout:
@@ -105,6 +132,8 @@ def main(argv=None) -> int:
             return 0
         write(result)
         print(f"giddy: {new} <- {old}: {n} file(s) -> {result.report}")
+        for line in _graph(result):
+            print(line)
         return 0
     except GiddyError as err:
         print(f"giddy: {err}", file=sys.stderr)

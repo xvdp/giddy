@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 
 from .git import Repo
-from .lang import Adapter, Line, TextAdapter, Unit, adapter_for
+from .lang import Adapter, Line, TextAdapter, Unit, adapter_for, parsed
 from .snapshots import Snapshot
 
 
@@ -152,9 +152,10 @@ def changed_paths(repo: Repo, new: Snapshot, old: Snapshot, pathspec: str,
 
 
 def matches_ext(path: str, exts: tuple[str, ...] | None) -> bool:
-    """True when `exts` is empty or the file name ends in `.<ext>` for one of them (case-insensitive)."""
+    """`exts` empty ('all'): a file giddy parses (registered language, or markdown: its code fences); else the
+    file name ends in `.<ext>` for one of them (case-insensitive)."""
     if not exts:
-        return True
+        return parsed(path)
     name = path.rsplit("/", 1)[-1].lower()
     return any(name.endswith("." + e) for e in exts)
 
